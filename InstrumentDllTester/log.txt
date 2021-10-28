@@ -1,0 +1,2 @@
+CModbusTCPConnection::Establish() : Try connect from connection srting  : 192.168.50.3:502MODBUS_REQUEST::Send() : send: 03 00 00 00 00 06 01 04 01 00 01 00 
+MODBUS_REQUEST::Send() : recv: 03 00 00 00 00 03 01 84 03 

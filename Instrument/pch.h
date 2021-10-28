@@ -7,7 +7,38 @@
 #ifndef PCH_H
 #define PCH_H
 
+#define _DLL_MASTER_
+
+#pragma comment(lib, "Ws2_32.lib")
+
+#define _WINSOCK_DEPRECATED_NO_WARNINGS
+
+
 // add headers that you want to pre-compile here
 #include "framework.h"
+
+#include <windows.h>
+#include <WinSock2.h>
+#include <ws2tcpip.h>
+
+
+//STL
+#include <vector>
+#include <map>
+#include <set>
+#include <list>
+#include <string>
+#include <iostream>
+#include <algorithm>
+#include <fstream>
+#include <float.h>
+#include <math.h>
+#include <sstream>
+#include <strstream>
+#include <iomanip>
+#include <typeinfo>
+#include <bitset>
+#include <numeric>
+
 
 #endif //PCH_H
