@@ -3,7 +3,7 @@
 #include "instrument.h"
 #include "registers.h"
 #include "helper.h"
-#include "ModbusTCPConnection.h"
+
 
 #pragma comment(linker, "/EXPORT:InitInst=_InitInst@4")
 #pragma comment(linker, "/EXPORT:Shutter=_Shutter@4")
@@ -15,9 +15,16 @@
 #pragma comment(linker, "/EXPORT:GetZero=_GetZero@4")
 #pragma comment(linker, "/EXPORT:SetTick=_SetTick@4")
 
+//////////////////////////////////////////
+/*		√ЋќЅјЋ№Ќџ≈ ѕ≈–ћ≈ЌЌџ≈			*/
+//////////////////////////////////////////
 
-CModbusTCPConnection dev;
-std::ofstream logger;
+//modbus соединение
+modbus_t *mb;
+
+//---------------------------------------------------------
+
+
 
 
 BOOL APIENTRY DllMain( HMODULE hModule,
@@ -29,18 +36,7 @@ BOOL APIENTRY DllMain( HMODULE hModule,
     {
 		case DLL_PROCESS_ATTACH: {
 		
-			//создание экземпл€ра класса modbus соединени€ 
-			//pConnection = new CModbusTCPConnection();
-
-			WSADATA ws;
-			if (::WSAStartup(MAKEWORD(2, 2), &ws) != 0)
-			{
-				std::cerr << "Unable to initialize sockets" << std::endl;
-				return FALSE;
-			}
-
-			logger.open("log.txt");
-
+						
 		}
 		break;
 
@@ -52,7 +48,7 @@ BOOL APIENTRY DllMain( HMODULE hModule,
 
 		case DLL_THREAD_DETACH:
 		{
-			logger.close();
+			
 		}
 		break;
 
@@ -72,30 +68,42 @@ extern "C" {
 	IMPEXP bool CALLCONV  InitInst(const char* path)
 	{
 		// если передали строку адреса в виде "ipaddress:port" "192.168.10.18:502" 
-		bool connected = dev.Establish(path, &logger);
+		std::pair<std::string, int> opt = helper::connection(path);
+		mb = modbus_new_tcp(opt.first.c_str(), opt.second);
+		int connected = modbus_connect(mb);			   
 
-		//если не соеденились пробуем загрузить из файла
-		if (!connected)
+		//если не соеденились пробуем загрузить из файла path
+		if (connected == -1)
 		{
 			std::ifstream input;
 			input.open(path);
 
-			connected = dev.Establish(input, &logger);
-		}	
+			std::pair<std::string, int> opt = helper::connection(input);
+			mb = modbus_new_tcp(opt.first.c_str(), opt.second);
+			connected = modbus_connect(mb);
+		}
+
+		//если не соеденились пробуем загрузить из файла в текущей директории "connect.txt"
+		if (connected == -1)
+		{
+			std::ifstream input;
+			input.open("connect.txt");
+
+			std::pair<std::string, int> opt = helper::connection(input);
+			mb = modbus_new_tcp(opt.first.c_str(), opt.second);
+			connected = modbus_connect(mb);
+		}
 
 		//если не удалось соеденитс€ возвращаем  false  
-		if (!connected)
+		if (connected == -1)
 			return false;	
 
+		uint16_t tab_reg[32];
+		int readCount = modbus_read_input_registers(mb, 0, 1, tab_reg);
 
-		std::vector<unsigned char> res;
-		unsigned short szData[] =
-		{
-			1,
-			1
-		};
+		tab_reg[0] = 200;
+		int writeConut = modbus_write_registers(mb, 1, 1, tab_reg); 
 
-		dev.Transact(ReadInputRegisters, (char*)szData, sizeof(szData), res, &logger);
 
 		return true;
 	}
@@ -103,7 +111,7 @@ extern "C" {
 	//ќткрывает(state = 1) и закрывает(state = 0) затвор.
 	IMPEXP bool CALLCONV Shutter(unsigned char state)
 	{
-		//if (connection.)
+		
 		return false;
 	}
 

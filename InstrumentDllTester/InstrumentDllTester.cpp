@@ -5,19 +5,25 @@
 #include <string>
 #include "InstrumentWrapper.h"
 
+
 int main()
-{
+{	
+
+	std::system("chcp 1251");
+
 	InstrumentWrapper wr;
 	if (!wr.Load("Instrument.dll"))
 		std::cout << "Ошибка загрузки Instrument.dll\n";
 
-	std::string str = "192.168.50.3:502";
+	std::string str = "127.0.0.1:502";
 
 	std::cout << "Подключение к modbus ... " << str;
 
-	if (!wr.Initialize("192.168.50.3:502"))
+	if (!wr.Initialize(str.c_str()))
 		std::cout << "Ошибка  подключения ... " << str;
-
+	else
+		std::cout << "Подключение установлено ... " << str;
+		
     std::cout << "Hello World!\n";
 }
 

@@ -65,7 +65,7 @@ bool tagMODBUS_REQUEST::Send(SOCKET sock, MODBUS_COMMAND cmd, const char* data, 
 	if ( hdr != *(unsigned long*)this)
 	{
 		if (pLog)
-			*pLog << "MODBUS_REQUEST::Send() : Invalid Modbus packet header received.";
+			*pLog << "MODBUS_REQUEST::Send() : Invalid Modbus packet header received." << endl;
 		return false;
 	}
 
@@ -116,8 +116,6 @@ bool tagMODBUS_REQUEST::Send(SOCKET sock, MODBUS_COMMAND cmd, const char* data, 
 			length = 0;
 		}		
 		break;
-		
-
 	}
 	
 
@@ -129,7 +127,7 @@ unsigned CModbusTCPConnection::nReadTimeout = 1000;			// 1 second
 unsigned CModbusTCPConnection::nWriteTimeout = 1000;		// 1 second
 unsigned CModbusTCPConnection::nMulfunctionTimeout = 60000;	// 1 minute
 
-
+//соединение по ip и номеру порта
 bool CModbusTCPConnection::Establish(std::string strIP, unsigned nPort, std::ostream* pLog)
 {
 	assert(sock == INVALID_SOCKET);
@@ -188,7 +186,7 @@ bool CModbusTCPConnection::Establish(std::string str, std::ostream* pLog)
 	static char szPrefix[] = "CModbusTCPConnection::Establish() : ";
 
 	if (pLog)
-		*pLog << szPrefix << "Try connect from connection srting  : " << str;
+		*pLog << szPrefix << "Try connect from connection string  : " << str << endl;
 
 	unsigned int port = 502;
 	std::string ip;
@@ -205,7 +203,7 @@ bool CModbusTCPConnection::Establish(std::string str, std::ostream* pLog)
 		catch (...)
 		{
 			if (pLog)
-				*pLog << szPrefix << "Invalid connection srting  : " << str;
+				*pLog << szPrefix << "Invalid connection srting  : " << str << endl;
 
 			return false;
 		}
@@ -220,12 +218,12 @@ bool CModbusTCPConnection::Establish(std::ifstream& inp, std::ostream* pLog)
 	static char szPrefix[] = "CModbusTCPConnection::Establish() : ";
 
 	if (pLog)
-		*pLog << szPrefix << "Try connect from connection input stream";
+		*pLog << szPrefix << "Try connect from connection input stream" << endl;
 
 	if (inp.bad()) 
 	{		
 		if (pLog)
-			*pLog << szPrefix << "Invalid input stream";
+			*pLog << szPrefix << "Invalid input stream" << endl;
 
 		return false;
 	}
@@ -265,7 +263,7 @@ bool CModbusTCPConnection::Transact(MODBUS_COMMAND cmd, const char* data, unsign
 	if (!request.Send(sock, cmd, data, data_size, pLog))
 	{
 		if (pLog)
-			*pLog << szPrefix << "Unable to send data. ";
+			*pLog << szPrefix << "Unable to send data. " << endl;
 		
 		if ( lpfnErrorCallback )
 			if ( !lpfnErrorCallback(lpPar) )
