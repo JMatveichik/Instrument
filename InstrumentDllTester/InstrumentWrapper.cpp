@@ -42,3 +42,58 @@ bool InstrumentWrapper::Initialize(const char* str)
 
 	return false;
 }
+
+bool InstrumentWrapper::Shutter(unsigned char state)
+{
+	if (m_lpShutterFunc)
+		return m_lpShutterFunc(state);
+
+	return false;
+}
+
+
+bool InstrumentWrapper::Filter(int filter) 
+{
+	if (m_lpFilterFunc)
+		return m_lpFilterFunc(filter);
+
+	return false;
+}
+
+
+bool InstrumentWrapper::Lamp(const char *kind, unsigned char state)
+{
+	if (m_lpLampFunc)
+		return m_lpLampFunc(kind, state);
+
+	return false;
+}
+bool InstrumentWrapper::Disp(unsigned char n, const char *state)
+{
+	if (m_lpDispFunc)
+		return m_lpDispFunc(n, state);
+
+	return false;
+}
+
+bool InstrumentWrapper::Slit(const char *state)
+{
+	if (m_lpSlitFunc)
+		return m_lpSlitFunc(state);
+
+	return false;
+}
+bool InstrumentWrapper::CloseInstance() 
+{
+	if (m_lpCloseInstanceFunc)
+		return m_lpCloseInstanceFunc();
+
+	return false;
+}
+bool InstrumentWrapper::GetZero(const char *state)
+{
+	if (m_lpGetZeroFunc)
+		return m_lpGetZeroFunc(state);
+
+	return false;
+}

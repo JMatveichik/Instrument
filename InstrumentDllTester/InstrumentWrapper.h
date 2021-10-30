@@ -15,7 +15,7 @@ typedef bool (INSTRUMENTFN *LPFNLAMP)(const char *kind, unsigned char state);
 typedef bool (INSTRUMENTFN *LPFNDISP)(unsigned char n, const char *state);
 typedef bool (INSTRUMENTFN *LPFNSLIT)(const char *state);
 typedef bool (INSTRUMENTFN *LPFNÑLOSEINST)();
-typedef bool (INSTRUMENTFN *LPFNGETZERO)();
+typedef bool (INSTRUMENTFN *LPFNGETZERO)(const char *state);
 
 
 #ifdef _M_X64
@@ -51,6 +51,20 @@ public:
 	bool Load(const char* dllpath);
 
 	bool Initialize(const char* dllpath);
+
+	bool Shutter(unsigned char state);
+
+	bool Filter(int filter);
+
+	bool Lamp(const char *kind, unsigned char state);
+
+	bool Disp(unsigned char n, const char *state);
+
+	bool Slit(const char *state);
+
+	bool CloseInstance();
+
+	bool GetZero(const char *state);
 
 
 private:

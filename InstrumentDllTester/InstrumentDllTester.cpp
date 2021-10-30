@@ -6,6 +6,8 @@
 #include "InstrumentWrapper.h"
 
 
+void TestShutter(InstrumentWrapper& wr, unsigned char state);
+
 int main()
 {	
 
@@ -17,14 +19,27 @@ int main()
 
 	std::string str = "127.0.0.1:502";
 
-	std::cout << "Подключение к modbus ... " << str;
+	std::cout << "Подключение к НЕСМИТ ... " << str << std::endl;
 
 	if (!wr.Initialize(str.c_str()))
-		std::cout << "Ошибка  подключения ... " << str;
+		std::cout << "Ошибка  подключения к НЕСМИТ... " << str << std::endl;
 	else
-		std::cout << "Подключение установлено ... " << str;
+		std::cout << "Подключение к НЕСМИТ установлено ... " << str << std::endl;
 		
-    std::cout << "Hello World!\n";
+	
+	TestShutter(wr, 1);
+	TestShutter(wr, 0);
+	
+	
+}
+
+void TestShutter(InstrumentWrapper& wr, unsigned char state)
+{
+	std::cout << "Тестирование Shutter : " << (char)state << std::endl;
+
+	if (!wr.Shutter(state)) {
+		std::cout << "Ошибка  Shutter... "  << std::endl;
+	}
 }
 
 // Run program: Ctrl + F5 or Debug > Start Without Debugging menu

@@ -26,72 +26,71 @@ enum RegisterStartAddress{
 
 	//Регистр версии прошивки
 	VersionRegister = 0x10
-
 };
 
 
 //Маски регистра управления
-enum ControlRegisterMasks
+enum ControlRegisterBits
 { 
 	//бит управление входным затвором
-	ShutterBit = 1 << 0,
+	ShutterBit,
 
 	//бит управление лампой FF
-	LampFFBit = 1 << 1,
+	LampFFBit ,
 
 	//бит управление лампой FF
-	LampCSBit = 1 << 2,
+	LampCSBit,
 
-	//Упаравление питанием камеры
-	CameraBit = 1 << 3,
+	//Бит упаравление питанием камеры
+	CameraBit,
 
-	//Управление заслонкой scr
-	ScrBit = 1 << 4
+	//Бит управление заслонкой scr
+	ScrBit
 };
 
-//Маски регистра входов
-enum InputRegisterMasks
+//Биты регистра входов
+enum InputRegisterBits
 {
-	//маска состояние концевика решетки
-	LimitSW = 1 << 0,
+	//бит состояние концевика решетки
+	LimitSW,
 
-	//маска состояние датчика полож решетки	
-	ZeroSW = 1 << 1	
+	//бит состояние датчика полож решетки	
+	ZeroSW
 };
 
-//Маски регистра команд
-enum CommandRegisterMasks
+//Биты регистра команд
+enum CommandRegisterBits
 {
-	//маска значение угла в тиках таймера
-	Angle = 1 << 0,
+	//бит значение угла в тиках таймера
+	Angle,
 
-	//маска Режим калибровки зазора системы
-	Gap = 1 << 1,
+	//бит Режим калибровки зазора системы
+	Gap,
 
-	//Остановка двигателя
-	StopEngine = 1 << 2,
+	//бит Остановка двигателя
+	StopEngine,
 
-	//Сброс калибровки нуля
-	ResetZero = 1 << 3,
+	//бит Сброс калибровки нуля
+	ResetZero,
 
-	//Выполнить калибровку нуля
-	GetZeroCalibration = 1 << 4,
+	//бит Выполнить калибровку нуля
+	GetZeroCalibration,
 };
 
 //Маски регистра состояния
-enum StatusRegisterMasks
+enum StatusRegisterBits
 {
-	//маска готовность клиента к работе
-	Client = 1 << 0,
+	//бит готовность клиента к работе
+	Client,
 
-	//маска запрос на выполнение команды
-	CommandRequest = 1 << 1,
+	//бит запрос на выполнение команды
+	CommandRequest,
 
-	//Занятость выполнением команды
-	CommandBusy = 1 << 2,
+	//бит Занятость выполнением команды
+	CommandBusy,
 
-	//Статус калибровки нулевой точки
-	ZeroState = 1 << 3	
+	//бит Статус калибровки нулевой точки
+	ZeroState	
 };
 
 
