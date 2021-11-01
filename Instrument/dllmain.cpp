@@ -42,11 +42,13 @@ BOOL CALLBACK ModalDialogProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
 	HWND mainwnd = GetParent(hwnd);	
 	switch (msg)
 	{
+	
 	case WM_CREATE:
 		{
-		std::stringstream ss;
-		ss << "WM_CREATE with handle : " << std::hex << hwnd;
-		OutputDebugString(ss.str().c_str());
+			std::stringstream ss;
+			ss << "WM_CREATE with handle : " << std::hex << hwnd;
+			OutputDebugString(ss.str().c_str());
+			
 		}
 		break;
 
@@ -56,7 +58,8 @@ BOOL CALLBACK ModalDialogProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
 			std::stringstream ss;
 			ss << "WM_PAINT with handle : " << std::hex << hwnd << std::endl;
 			OutputDebugString(ss.str().c_str());
-		
+			
+			
 		}
 	
 		case WM_TIMER:
@@ -71,6 +74,7 @@ BOOL CALLBACK ModalDialogProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
 
 			ss << "WM_TIMER with handle : " << std::hex << hwnd << std::endl;
 			OutputDebugString(ss.str().c_str());
+			
 		}
 
 		break;
@@ -84,7 +88,8 @@ BOOL CALLBACK ModalDialogProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
 			ss << "WM_INITDIALOG with handle : " << std::hex << hwnd << std::endl;
 			OutputDebugString(ss.str().c_str());
 
-			SetTimer(hwnd, PROGRESS_TIMER_ID, 250, NULL);			
+			SetTimer(hwnd, PROGRESS_TIMER_ID, 250, NULL);	
+			
 		}		
 		break;
 
@@ -98,11 +103,11 @@ BOOL CALLBACK ModalDialogProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
 			KillTimer(hwnd, PROGRESS_TIMER_ID);
 			//EndDialog(hwnd, TRUE);//destroy dialog window
 			
-
+			
 		}
 		break;
 	}
-	return TRUE;
+	return TRUE; //DefWindowProc(hwnd, msg, wParam, lParam);
 }
 
 
@@ -266,12 +271,16 @@ BOOL APIENTRY DllMain( HMODULE hModule,
 
 		case DLL_THREAD_DETACH:
 		{
+			modbus_close(mb);
+			modbus_free(mb);
 			
 		}
 		break;
 
 		case DLL_PROCESS_DETACH:
 		{
+			modbus_close(mb);
+			modbus_free(mb);
 		}
 		break;
        
@@ -471,9 +480,9 @@ extern "C" {
 		if (!connect(path)) {
 
 			ss << "Ошибка соединения со  спректрографом НЕСМИТ. Выполните  следующее :" << std::endl;
-			ss << "\t- Убедитесь что питание прибора влючено" << std::endl;
-			ss << "\t- Убедитесь что прибора подключен к локальной сети" << std::endl;
-			ss << "\t- Отредактируйте файл <connect.txt> в соответствии с реальным адресом устройства (IP:PORT )" << std::endl;
+			ss << "  - Убедитесь что питание прибора влючено" << std::endl;
+			ss << "  - Убедитесь что прибора подключен к локальной сети" << std::endl;
+			ss << "  - Отредактируйте файл <connect.txt> в соответствии с реальным адресом устройства (IP:PORT )" << std::endl;
 
 			MessageBox(g_mainWnd, ss.str().c_str(), cap.c_str(), MB_OK|MB_ICONERROR);
 		}
@@ -484,7 +493,7 @@ extern "C" {
 		/*
 		bool busy = checkstatusbit(CommandBusy);
 		//временно---------------------------------
-		setstatusbit(CommandBusy, false);
+		setstatusbit(CommandBusy, true);
 		//-----------------------------------------
 		busy = checkstatusbit(CommandBusy);
 		*/
@@ -633,19 +642,24 @@ extern "C" {
 		}
 
 		//спектрограф занят другой операцией
-		/*bool busy = checkstatusbit(CommandBusy);
+		bool busy = checkstatusbit(CommandBusy);
 		if (busy) {
-			ss << "Спектрограф занят выполнением операции";
+			ss << "Спектрограф занят выполнением операции...";
 			MessageBox(g_mainWnd, ss.str().c_str(), cap.c_str(), MB_OK | MB_ICONERROR);
 			return false;
 		}
-		*/
+		
 		
 		int ang = std::atoi(angle);
 		//ошибка задания угла наклона диспергирующего устройства
 		if (ang < 8 || ang > 30)
-			return false;	
-
+		{
+			
+				ss << "Ошибка задания угла (от 8 до 30) : " << ang << std::endl;
+				MessageBox(g_mainWnd, ss.str().c_str(), cap.c_str(), MB_OK | MB_ICONERROR);
+				return false;			
+		}
+			
 		//приводим к внутреннему значению прибора
 		ang *= 1000;
 		
@@ -669,10 +683,9 @@ extern "C" {
 		}
 
 		uint16_t progress = 0;
-		bool complete = false;
-		
+		bool complete = false;		
 
-		
+		//отображаем окно прогресса
 		ShowProgressWnd();
 
 		while (!complete) {
@@ -680,15 +693,20 @@ extern "C" {
 			//ожидаем
 			Sleep(250);
 
+			//получаем прогрес из регистра 0-255
 			getregister(ProgressRegister, progress);
 
-			complete = checkstatusbit(CommandBusy);
-
+			//обновляем гобальный прогресс для отображения в окне
 			g_currentProgress = progress * 100 / 256;
 
+			//обновляем окно прогресса
 			UpdateWindow(g_hwndProgressDlg);
+
+			//проверяем бит регистра состояния о занятости прибора
+			complete = checkstatusbit(CommandBusy);			
 		}
-			
+		
+		//закрываем окно прогресса
 		CloseProgressWnd();
 
 		return true;
@@ -699,7 +717,7 @@ extern "C" {
 	IMPEXP bool CALLCONV Slit(const char *state)
 	{
 		std::stringstream ss;
-		std::string cap = "Slit";
+		std::string cap = "НЭСМИТ : Диспергирующее устройство";
 
 
 		ss << "Вызов функции (" << cap << ") : ";
@@ -719,13 +737,24 @@ extern "C" {
 	IMPEXP bool CALLCONV CloseInst()
 	{
 		std::stringstream ss;
-		std::string cap = "CloseInst";
+		std::string cap = "НЭСМИТ : Освобождение ресурсов";
 
-		ss << "Вызов функции (" << cap << ") : " << "отключчение от спектрографа";
+		// Записать в регистр X008, бит-0, значение 1.
+		if (!setstatusbit(Client, false))
+		{
+			ss << "Сбой связи со спектрографом!\nСвязь с устройством будет разорвана...";
+			MessageBox(g_mainWnd, ss.str().c_str(), cap.c_str(), MB_OK | MB_ICONERROR);
 
-		MessageBox(g_mainWnd, ss.str().c_str(), cap.c_str(), MB_OK);
+			modbus_close(mb);
+			modbus_free(mb);
 
-		return false;
+			return false;
+		}		
+		
+		modbus_close(mb);
+		modbus_free(mb);		
+
+		return true;
 	}
 
 	//Выполняет 
