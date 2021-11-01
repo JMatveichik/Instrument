@@ -21,9 +21,12 @@
 
 #include <modbus.h>
 
+#include <tlhelp32.h>
+
 #include <windows.h>
-#include <WinSock2.h>
-#include <ws2tcpip.h>
+#include <CommCtrl.h>
+//#include <WinSock2.h>
+//#include <ws2tcpip.h>
 
 
 //STL

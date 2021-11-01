@@ -1,7 +1,8 @@
 #pragma once
 
 //начальные адреса регистров
-enum RegisterStartAddress{
+enum RegisterStartAddress : int
+{
 
 	//Регистр управления
 	ControlRegister = 0x01,
@@ -19,7 +20,7 @@ enum RegisterStartAddress{
 	CommandRegister = 0x07,
 
 	//Регистр состояний
-	StatusRegistr = 0x08,
+	StatusRegister = 0x08,
 
 	//Регистр прогресса
 	ProgressRegister = 0x09,
@@ -30,7 +31,7 @@ enum RegisterStartAddress{
 
 
 //Маски регистра управления
-enum ControlRegisterBits
+enum ControlRegisterBits : unsigned char
 { 
 	//бит управление входным затвором
 	ShutterBit,
@@ -49,7 +50,7 @@ enum ControlRegisterBits
 };
 
 //Биты регистра входов
-enum InputRegisterBits
+enum InputRegisterBits : unsigned char
 {
 	//бит состояние концевика решетки
 	LimitSW,
@@ -59,7 +60,7 @@ enum InputRegisterBits
 };
 
 //Биты регистра команд
-enum CommandRegisterBits
+enum CommandRegisterBits : unsigned char
 {
 	//бит значение угла в тиках таймера
 	Angle,
@@ -78,7 +79,7 @@ enum CommandRegisterBits
 };
 
 //Маски регистра состояния
-enum StatusRegisterBits
+enum StatusRegisterBits : unsigned char
 {
 	//бит готовность клиента к работе
 	Client,

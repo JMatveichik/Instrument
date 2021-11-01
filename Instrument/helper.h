@@ -4,7 +4,7 @@
 namespace helper
 {
 
-	template<class T = unsigned char>
+	/*template<class T = unsigned char>
 	class bitmask
 	{
 	public:
@@ -32,6 +32,34 @@ namespace helper
 	protected:
 		T mask[sizeof(T) * 8];
 	};
+	*/
+
+	///установить/сбросить бит
+	static uint16_t setbit(uint16_t inp, unsigned char bit, bool state)
+	{
+		uint16_t output = inp;
+		if (state)
+			output |= (1 << bit);  // set
+		else
+			output &= ~(1 << bit); //clear
+		
+		return output;
+	}
+
+	//проверить бит
+	static bool checkbit(uint16_t inp, unsigned char bit)
+	{
+		uint16_t mask = (1 << bit);
+		uint16_t res = inp & mask;
+		return (res != 0);
+	}
+
+	//проверить бит
+	static bool checkbitstate(uint16_t inp, unsigned char bit, bool state)
+	{
+		bool cur = checkbit(inp, bit);
+		return  cur == state;
+	}
 
 	///разделить строку на подстроки по разделителю
 	static std::vector<std::string> split(std::string src, const char delim)

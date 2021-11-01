@@ -1,0 +1,103 @@
+
+#define MESSAGE_MAP(MessageParam, MessageCallback)\
+    if(message == MessageParam)\
+        return MessageCallback(hwnd, message, wParam, lParam)
+
+#define MESSAGE_MAP_COMMAND(Identifier, MessageCallback)\
+    if((message == WM_COMMAND) && (LOWORD(wParam) == Identifier))\
+    return MessageCallback(hwnd, message, wParam, lParam);
+
+
+
+
+BOOL CALLBACK DialogProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam);
+
+BOOL OnDialogInit(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam);
+
+BOOL OnDialogCreate(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam);
+
+BOOL OnDialogDestroy(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam);
+
+BOOL OnDialogClose(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam);
+
+BOOL OnTimer(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam);
+
+BOOL OnPaint(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam);
+
+BOOL CALLBACK DialogProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam)
+{
+	MESSAGE_MAP(WM_CREATE, OnDialogCreate);
+	MESSAGE_MAP(WM_INITDIALOG, OnDialogInit);
+	MESSAGE_MAP(WM_DESTROY, OnDialogDestroy);
+	MESSAGE_MAP(WM_CLOSE, OnDialogClose);
+	MESSAGE_MAP(WM_TIMER, OnTimer);
+	MESSAGE_MAP(WM_PAINT, OnPaint);
+
+	return FALSE;
+}
+
+
+BOOL OnPaint(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam)
+{
+	HWND hwndProgressBar = GetDlgItem(hwnd, IDC_PROGRESS);
+	UINT iPos = SendMessage(hwndProgressBar, PBM_SETPOS, g_currentProgress, 0);
+
+	//HWND hwndHeader = GetDlgItem(hwnd, IDC_HEADER);
+
+	std::stringstream ss;
+	ss << "Прогресс " << g_currentProgress << " % ";
+	SetDlgItemText(hwnd, IDC_HEADER, ss.str().c_str());
+
+	return FALSE;
+}
+
+BOOL OnTimer(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam)
+{
+	HWND hwndProgressBar = GetDlgItem(hwnd, IDC_PROGRESS);
+	UINT iPos = SendMessage(hwndProgressBar, PBM_SETPOS, g_currentProgress, 0);
+
+	//HWND hwndHeader = GetDlgItem(hwnd, IDC_HEADER);
+
+	std::stringstream ss;
+	ss << "Прогресс " << g_currentProgress << " % ";
+	SetDlgItemText(hwnd, IDC_HEADER, ss.str().c_str() );
+
+	//SendMessage(hwndHeader, WM_SETTEXT, currentProgress, 0);
+
+	if (g_currentProgress >= 100)
+		SendMessage(hwnd, WM_CLOSE, g_currentProgress, 0);
+
+	return TRUE;
+}
+
+BOOL OnDialogInit(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam)
+{
+	std::stringstream ss;
+	ss << "Прогресс " << g_currentProgress << " % ";
+	SetDlgItemText(hwnd, IDC_HEADER, ss.str().c_str());
+
+	SetTimer(hwnd, PROGRESS_TIMER_ID, 500, NULL);
+	return FALSE;
+}
+
+BOOL OnDialogCreate(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam)
+{
+	SetTimer(hwnd, PROGRESS_TIMER_ID, 500, NULL);
+	return FALSE;
+}
+
+BOOL OnDialogDestroy(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam)
+{
+	KillTimer(hwnd, PROGRESS_TIMER_ID);
+	PostQuitMessage(0);
+	return FALSE;
+}
+
+BOOL OnDialogClose(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam)
+{
+	KillTimer(hwnd, PROGRESS_TIMER_ID);
+	DestroyWindow(hwnd);
+	return FALSE;
+}
+
+*/
