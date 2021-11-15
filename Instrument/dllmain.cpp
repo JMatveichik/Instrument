@@ -5,6 +5,10 @@
 #include "helper.h"
 #include "resource.h"
 
+#ifdef _MSC_VER
+	#pragma comment(lib, "user32.lib")
+#endif
+
 
 #pragma comment(linker, "/EXPORT:InitInst=_InitInst@4")
 #pragma comment(linker, "/EXPORT:Shutter=_Shutter@4")
