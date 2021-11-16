@@ -3,95 +3,82 @@
 //начальные адреса регистров
 enum RegisterStartAddress : int
 {
-
-	//Регистр управления
-	ControlRegister = 0x01,
-
-	//Регистр входов
-	InputRegisters = 0x02,
-
+	//Регистр управления 8 bit и Регистр входов Регистр входов
+	ControlAndInputRegister = 0x00,
+	
 	//Верхний регистр положения
-	PositionHightRegister = 0x03,
+	PositionHightRegister = 0x01,
 
 	//Нижний регистр положения
-	PositionLowRegister = 0x05,
+	PositionLowRegister = 0x02,
 
-	//Командный регистр
-	CommandRegister = 0x07,
-
-	//Регистр состояний
-	StatusRegister = 0x08,
+	//Командный регистр 8 bit и Регистр состояний 8 bit
+	CommandAndStatusRegister = 0x03,
 
 	//Регистр прогресса
-	ProgressRegister = 0x09,
+	ProgressRegister = 0x04,
 
 	//Регистр версии прошивки
-	VersionRegister = 0x10
+	VersionRegister = 0x5
 };
 
 
-//Маски регистра управления
-enum ControlRegisterBits : unsigned char
+//биты регистра управления и регистра входов
+enum ControlAndInputRegisterBits : unsigned char
 { 
 	//бит управление входным затвором
-	ShutterBit,
+	ShutterBit = 0x00,
 
 	//бит управление лампой FF
-	LampFFBit ,
+	LampFFBit = 0x01,
 
 	//бит управление лампой FF
-	LampCSBit,
+	LampCSBit = 0x02,
 
 	//Бит упаравление питанием камеры
-	CameraBit,
+	CameraBit = 0x03,
 
 	//Бит управление заслонкой scr
-	ScrBit
-};
+	ScrBit = 0x04,
 
-//Биты регистра входов
-enum InputRegisterBits : unsigned char
-{
 	//бит состояние концевика решетки
-	LimitSW,
+	LimitSW = 0x08,
 
 	//бит состояние датчика полож решетки	
-	ZeroSW
+	ZeroSW = 0x08,
 };
+
+
 
 //Биты регистра команд
-enum CommandRegisterBits : unsigned char
+enum CommandAndStatusRegisterBits : unsigned char
 {
 	//бит значение угла в тиках таймера
-	Angle,
+	Angle = 0x00,
 
 	//бит Режим калибровки зазора системы
-	Gap,
+	Gap = 0x01,
 
 	//бит Остановка двигателя
-	StopEngine,
+	StopEngine = 0x02,
 
 	//бит Сброс калибровки нуля
-	ResetZero,
+	ResetZero = 0x03,
 
 	//бит Выполнить калибровку нуля
-	GetZeroCalibration,
-};
+	GetZeroCalibration = 0x04,
 
-//Маски регистра состояния
-enum StatusRegisterBits : unsigned char
-{
 	//бит готовность клиента к работе
-	Client,
+	Client = 0x08,
 
 	//бит запрос на выполнение команды
-	CommandRequest,
+	CommandRequest = 0x09,
 
 	//бит Занятость выполнением команды
-	CommandBusy,
+	CommandBusy = 0x0A,
 
 	//бит Статус калибровки нулевой точки
-	ZeroState	
+	ZeroState = 0x0B
 };
 
 

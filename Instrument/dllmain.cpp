@@ -5,10 +5,6 @@
 #include "helper.h"
 #include "resource.h"
 
-#ifdef _MSC_VER
-	#pragma comment(lib, "user32.lib")
-#endif
-
 
 #pragma comment(linker, "/EXPORT:InitInst=_InitInst@4")
 #pragma comment(linker, "/EXPORT:Shutter=_Shutter@4")
@@ -110,8 +106,14 @@ BOOL CALLBACK ModalDialogProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
 			
 		}
 		break;
+
+		case WM_SIZE:
+		case WM_MOVE:
+			{
+				return DefWindowProc(hwnd, msg, wParam, lParam);
+			}
 	}
-	return TRUE; //DefWindowProc(hwnd, msg, wParam, lParam);
+	return TRUE; //
 }
 
 
@@ -275,16 +277,14 @@ BOOL APIENTRY DllMain( HMODULE hModule,
 
 		case DLL_THREAD_DETACH:
 		{
-			modbus_close(mb);
-			modbus_free(mb);
+			
 			
 		}
 		break;
 
 		case DLL_PROCESS_DETACH:
 		{
-			modbus_close(mb);
-			modbus_free(mb);
+			
 		}
 		break;
        
@@ -313,13 +313,22 @@ bool connect(const char* connectstring)
 		mb = modbus_new_tcp(opt.first.c_str(), opt.second);
 		connected = modbus_connect(mb);
 
+		modbus_set_slave(mb, 1);
+
 		return (connected == -1) ? false : true;
 	}
 
-	// если передали строку адреса в виде "ipaddress:port" "192.168.10.18:502" 
-	std::pair<std::string, int> opt = helper::connection(connectstring);
-	mb = modbus_new_tcp(opt.first.c_str(), opt.second);
-	connected = modbus_connect(mb);
+	try
+	{
+		// если передали строку адреса в виде "ipaddress:port" "192.168.10.18:502" 
+		std::pair<std::string, int> opt = helper::connection(connectstring);
+		mb = modbus_new_tcp(opt.first.c_str(), opt.second);
+		connected = modbus_connect(mb);
+	}
+	catch(...)
+	{
+		connected = -1;
+	}	
 
 	//если не соеденились пробуем загрузить из файла path
 	if (connected == -1)
@@ -330,6 +339,8 @@ bool connect(const char* connectstring)
 		std::pair<std::string, int> opt = helper::connection(input);
 		mb = modbus_new_tcp(opt.first.c_str(), opt.second);
 		connected = modbus_connect(mb);
+
+		modbus_set_slave(mb, 1);
 	}
 
 	//если не соеденились пробуем загрузить из файла в текущей директории "connect.txt"
@@ -341,23 +352,22 @@ bool connect(const char* connectstring)
 		std::pair<std::string, int> opt = helper::connection(input);
 		mb = modbus_new_tcp(opt.first.c_str(), opt.second);
 		connected = modbus_connect(mb);
+
+		modbus_set_slave(mb, 1);
 	}
 
 	//если не удалось соеденится возвращаем  false  
-	if (connected == -1)
-		return false;
-
-	return true;
+	return connected != -1;
 }
+
 
 //получение регистра
 bool  getregister(int reg, uint16_t& value)
 {
 	///получаем текущее состояние регистра  
 	uint16_t regs[16];
-	int readCount = modbus_read_registers(mb, reg, 1, regs);
-
-
+	int readCount = modbus_read_input_registers(mb, reg, 1, regs);
+	
 	//если не удалось выход 
 	if (readCount == -1)
 		return false;
@@ -371,8 +381,8 @@ bool setregisterbit(int reg, unsigned char bit, bool state)
 {
 	///получаем текущее состояние регистра  
 	uint16_t tab_reg[16];
-	int readCount = modbus_read_registers(mb, reg, 1, tab_reg);
-
+	int readCount = modbus_read_input_registers(mb, reg, 1, tab_reg);
+	
 	//если не удалось выход 
 	if (readCount == -1)
 		return false;
@@ -388,7 +398,7 @@ bool setregisterbit(int reg, unsigned char bit, bool state)
 		return false;
 
 	//подтверждение записи получаем регистр заново
-	readCount = modbus_read_registers(mb, reg, 1, tab_reg);
+	readCount = modbus_read_input_registers(mb, reg, 1, tab_reg);
 
 	//если не удалось выход 
 	if (readCount == -1)
@@ -400,24 +410,26 @@ bool setregisterbit(int reg, unsigned char bit, bool state)
 ///установить бит в регистре статуса (X008)
 bool setstatusbit(unsigned char bit, bool state)
 {
-	return setregisterbit(StatusRegister, bit, state);
+	return setregisterbit(CommandAndStatusRegister, bit, state);
 }
 
 ///установить бит в регистре команд (X007)
 bool setcommandbit(unsigned char bit, bool state)
 {
-	return setregisterbit(CommandRegister, bit, state);
+	return setregisterbit(CommandAndStatusRegister, bit, state);
 }
 
 ///установить бит в регистре управления (X001)
 bool setcontrolbit(unsigned char bit, bool state)
 {
-	return setregisterbit(ControlRegister, bit, state);
+	return setregisterbit(ControlAndInputRegister, bit, state);
 }
 
 ///проверка бита регистра
 bool checkregisterbit(int reg, unsigned char bit)
 {
+	modbus_flush(mb);
+
 	///получаем текущее состояние регистра  
 	uint16_t tab_reg[16];
 	int readCount = modbus_read_registers(mb, reg, 1, tab_reg);
@@ -426,23 +438,23 @@ bool checkregisterbit(int reg, unsigned char bit)
 	if (readCount == -1)
 		return false;
 
-	return helper::checkbit(tab_reg[0], bit);
+	return helper::checkbit(tab_reg[0], bit); 
 }
 
 ///проверить бит в регистре статуса (X008)
 bool checkstatusbit(unsigned char bit)
 {
-	return checkregisterbit(StatusRegister, bit);
+	return checkregisterbit(CommandAndStatusRegister, bit);
 }
 
 ///проверить бит в регистре управления (X001)
 bool checkcontrolbit(unsigned char bit)
 {
-	return checkregisterbit(ControlRegister, bit);
+	return checkregisterbit(ControlAndInputRegister, bit);
 }
 
 
-bool writeangle(int angle)
+bool writeangle(uint16_t angle)
 {
 	///получаем текущее состояние регистра  
 	uint16_t tab_reg[16];
@@ -454,11 +466,11 @@ bool writeangle(int angle)
 		return false;
 	*/
 
-	tab_reg[0] = HIWORD(angle);
-	tab_reg[1] = LOWORD(angle);
+	tab_reg[0] = angle;//HIWORD(angle);
+	//tab_reg[1] = LOWORD(angle);
 	
 	//запись в регистр нового значения
-	int writeConut = modbus_write_registers(mb, PositionLowRegister, 2, tab_reg);
+	int writeConut = modbus_write_register(mb, PositionLowRegister, tab_reg[0]);
 
 	//если запись не удлась 
 	if (writeConut == -1)
@@ -472,36 +484,39 @@ bool writeangle(int angle)
 
 
 extern "C" {
+	
 	// Записать в регистр X008, бит-0, значение 1. 
 	// Если запись прошла успешно, вернуть в функции значение true.
 	// запись прошла с ошибкой, выдать сообщение "НЭСМИТ ошибка связи", выдать значение функции false.
 	IMPEXP bool CALLCONV  InitInst(const char* path)
 	{
+		//ModbusConnector mbc(path);
+
 		std::stringstream ss;
 		std::string cap = "НЭСМИТ : Инициализация";
+		
+		try {
+			///соединение со спектрографом
+			if (!connect(path)) {
 
-		///соединение со спектрографом
-		if (!connect(path)) {
+				ss << "Ошибка соединения со  спректрографом НЕСМИТ по строке соединения - " << ((path == nullptr) ? "null" : path) << std::endl;
+				ss << "Выполните  следующее :" << std::endl;
+				ss << "  - Убедитесь что питание прибора влючено" << std::endl;
+				ss << "  - Убедитесь что прибора подключен к локальной сети" << std::endl;
+				ss << "  - Отредактируйте файл <connect.txt> в соответствии с реальным адресом устройства (IP:PORT )" << std::endl;
 
-			ss << "Ошибка соединения со  спректрографом НЕСМИТ. Выполните  следующее :" << std::endl;
-			ss << "  - Убедитесь что питание прибора влючено" << std::endl;
-			ss << "  - Убедитесь что прибора подключен к локальной сети" << std::endl;
-			ss << "  - Отредактируйте файл <connect.txt> в соответствии с реальным адресом устройства (IP:PORT )" << std::endl;
-
-			MessageBox(g_mainWnd, ss.str().c_str(), cap.c_str(), MB_OK|MB_ICONERROR);
+				MessageBox(g_mainWnd, ss.str().c_str(), cap.c_str(), MB_OK | MB_ICONERROR);
+				return false;
+			}
 		}
-
+		catch(...)
+		{
+			return false;
+			
+		}
 		//очищаем 
 		ss.str(std::string());
-
-		/*
-		bool busy = checkstatusbit(CommandBusy);
-		//временно---------------------------------
-		setstatusbit(CommandBusy, true);
-		//-----------------------------------------
-		busy = checkstatusbit(CommandBusy);
-		*/
-	
+		
 		// Записать в регистр X008, бит-0, значение 1.
 		if (setstatusbit(Client, true))
 			return true;

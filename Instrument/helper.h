@@ -80,7 +80,6 @@ namespace helper
 	{
 		std::vector<std::string> parts = split(src, ':');
 		std::pair<std::string, int> conn;
-
 		
 		try {
 			conn.first = parts[0];
