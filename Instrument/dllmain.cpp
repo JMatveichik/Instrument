@@ -495,8 +495,9 @@ extern "C" {
 		//сохраняем строки соединение
 		connectionString = path;
 
-		//соединение 
-		ModbusConnector mbc(mb, path);
+		//подключаемся 
+		ModbusConnector mbc(connectionString.c_str());
+		mb = mbc.Get();
 
 
 		std::stringstream ss;
@@ -540,7 +541,8 @@ extern "C" {
 	IMPEXP bool CALLCONV Shutter(unsigned char state)
 	{
 		//подключаемся 
-		ModbusConnector mbc(mb, connectionString.c_str());
+		ModbusConnector mbc(connectionString.c_str());
+		mb = mbc.Get();
 
 		std::stringstream ss;
 		std::string cap = "НЭСМИТ : Управление затвором";
@@ -574,7 +576,8 @@ extern "C" {
 	IMPEXP bool CALLCONV Filter(int value)
 	{
 		//подключаемся 
-		ModbusConnector mbc(mb, connectionString.c_str());
+		ModbusConnector mbc(connectionString.c_str());
+		mb = mbc.Get();
 
 		std::stringstream ss;
 		std::string cap = "Filter";
@@ -597,8 +600,8 @@ extern "C" {
 	IMPEXP bool CALLCONV Lamp(const char *kind, unsigned char state)
 	{
 		//подключаемся 
-		ModbusConnector mbc(mb, connectionString.c_str());
-
+		ModbusConnector mbc(connectionString.c_str());
+		mb = mbc.Get();
 
 		std::stringstream ss;
 		std::string cap = "НЭСМИТ : ";
@@ -664,7 +667,8 @@ extern "C" {
 	IMPEXP bool CALLCONV Disp(unsigned char state, const char* angle)
 	{
 		//подключаемся 
-		ModbusConnector mbc(mb, connectionString.c_str());
+		ModbusConnector mbc(connectionString.c_str());
+		mb = mbc.Get();
 
 		std::stringstream ss;
 		std::string cap = "НЭСМИТ : Диспергирующее устройство";
@@ -772,7 +776,8 @@ extern "C" {
 	IMPEXP bool CALLCONV Slit(const char *state)
 	{
 		//подключаемся 
-		ModbusConnector mbc(mb, connectionString.c_str());
+		ModbusConnector mbc(connectionString.c_str());
+		mb = mbc.Get();
 
 		std::stringstream ss;
 		std::string cap = "НЭСМИТ : Диспергирующее устройство";
@@ -795,7 +800,8 @@ extern "C" {
 	IMPEXP bool CALLCONV CloseInst()
 	{
 		//подключаемся 
-		ModbusConnector mbc(mb, connectionString.c_str());
+		ModbusConnector mbc(connectionString.c_str());
+		mb = mbc.Get();
 
 		std::stringstream ss;
 		std::string cap = "НЭСМИТ : Освобождение ресурсов";
@@ -817,7 +823,8 @@ extern "C" {
 	IMPEXP bool CALLCONV GetZero(const char *state)
 	{
 		//подключаемся 
-		ModbusConnector mbc(mb, connectionString.c_str());
+		ModbusConnector mbc(connectionString.c_str());
+		mb = mbc.Get();
 
 		std::stringstream ss;
 		std::string cap = "GetZero";
@@ -832,7 +839,8 @@ extern "C" {
 	IMPEXP bool CALLCONV SetTick(const char *state)
 	{
 		//подключаемся 
-		ModbusConnector mbc(mb, connectionString.c_str());
+		ModbusConnector mbc(connectionString.c_str());
+		mb = mbc.Get();
 
 		std::stringstream ss;
 		std::string cap = "SetTick";

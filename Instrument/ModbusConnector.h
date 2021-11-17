@@ -12,7 +12,7 @@ class ModbusConnector
 	public:
 		
 
-		ModbusConnector(modbus_t* mb, const char* connectstring)
+		ModbusConnector( const char* connectstring)
 		{
 			mb = nullptr;
 			connect(mb, connectstring);
@@ -20,14 +20,19 @@ class ModbusConnector
 
 		~ModbusConnector()
 		{
-			modbus_close(mb);
-			modbus_free(mb);
+			Release();
+		}
+
+		modbus_t* Get()
+		{
+			return mb;
 		}
 
 		void Release()
 		{
 			modbus_close(mb);
 			modbus_free(mb);
+			mb = nullptr;
 		}
 
 		bool isConnected()
