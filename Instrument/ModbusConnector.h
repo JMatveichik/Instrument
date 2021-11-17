@@ -12,9 +12,10 @@ class ModbusConnector
 	public:
 		
 
-		ModbusConnector(const char* connectstring)
+		ModbusConnector(modbus_t* mb, const char* connectstring)
 		{
-			connect(connectstring);
+			mb = nullptr;
+			connect(mb, connectstring);
 		}
 
 		~ModbusConnector()
@@ -37,12 +38,11 @@ class ModbusConnector
 
 	private:
 
+		//флаг соединения
+		int connected = -1;
 		
-		
-		bool connect(const char* connectstring)
-		{
-			//флаг соединения
-			int connected = -1;
+		bool connect(modbus_t* mb, const char* connectstring)
+		{	
 
 			//если не соеденились пробуем загрузить из файла в текущей директории "connect.txt"
 			if (connectstring == nullptr)
@@ -96,6 +96,6 @@ class ModbusConnector
 			//если не удалось соеденится возвращаем  false  
 			return connected != -1;
 		}
-	}
+	
 };
 

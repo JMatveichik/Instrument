@@ -176,6 +176,7 @@
     <ClInclude Include="framework.h" />
     <ClInclude Include="helper.h" />
     <ClInclude Include="instrument.h" />
+    <ClInclude Include="ModbusConnector.h" />
     <ClInclude Include="pch.h" />
     <ClInclude Include="registers.h" />
     <ClInclude Include="resource.h" />
@@ -195,9 +196,6 @@
   </ItemGroup>
   <ItemGroup>
     <ResourceCompile Include="Resource.rc" />
-  </ItemGroup>
-  <ItemGroup>
-    <Text Include="OldProgressWnd.txt" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">
