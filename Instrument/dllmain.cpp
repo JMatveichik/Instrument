@@ -4,7 +4,12 @@
 #include "registers.h"
 #include "helper.h"
 #include "resource.h"
-#include "ModbusConnector.h"
+#include "lock.h"
+
+//#define NOT_CHECK_CLIETN_BIT
+
+
+
 
 #pragma comment(linker, "/EXPORT:InitInst=_InitInst@4")
 #pragma comment(linker, "/EXPORT:Shutter=_Shutter@4")
@@ -13,7 +18,7 @@
 #pragma comment(linker, "/EXPORT:Disp=_Disp@8")
 #pragma comment(linker, "/EXPORT:Slit=_Slit@4")
 #pragma comment(linker, "/EXPORT:CloseInst=_CloseInst@0")
-#pragma comment(linker, "/EXPORT:GetZero=_GetZero@4")
+#pragma comment(linker, "/EXPORT:GetZero=_GetZero@0")
 #pragma comment(linker, "/EXPORT:SetTick=_SetTick@4")
 
 //////////////////////////////////////////
@@ -21,15 +26,56 @@
 //////////////////////////////////////////
 
 //modbus соединение
-modbus_t *mb;
+modbus_t* mb;
+
+//главное окно вызвавшего приложения
 HWND g_mainWnd = HWND_DESKTOP;
 
+//переменная отображения прогресса открытия 
 int g_currentProgress = 0;
-HINSTANCE hInstance = 0;
-HMODULE g_hModule = 0;
+
+//
+HINSTANCE	hInstance = 0;
+HMODULE		g_hModule = 0;
+
+//окно отображения прогресса
 HWND g_hwndProgressDlg = NULL;
 
+//строка соединения
 std::string connectionString;
+
+//директория dll
+std::string initdir;
+
+//выходной поток вывода логов
+std::ofstream loger;
+
+//максимальное количество попыток чтения регистров
+const int MAX_RETRIES = 3;
+
+//событие для остановки опроса ПЛК
+HANDLE	hStopEvent	= NULL;
+
+//поток чтения регистров
+HANDLE	hReadThread = NULL;
+DWORD	readThreadID;
+
+//интервал опроса ПЛК
+const DWORD	READ_INTERVAL = 500;
+
+
+//последнее прочитанное состояние регистров 
+uint16_t	CONTROL_AND_INPUT_REGISTER = 0;
+uint16_t	HIHTPOS_REGISTER = 0;
+uint16_t	LOWPOS_REGISTER = 0;
+uint16_t	COMMAND_AND_STATUS_REGISTER = 0;
+uint16_t	PROGRESS_REGISTER = 0;
+uint16_t	VERSION_REGISTER = 0;
+
+//критическая секция обработки даныых
+CRITICAL_SECTION workCS;
+
+
 //---------------------------------------------------------
 
 
@@ -42,6 +88,8 @@ std::string connectionString;
 BOOL CALLBACK ModalDialogProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
 {
 	HWND mainwnd = GetParent(hwnd);
+	HBRUSH hbrBackground = CreateSolidBrush(RGB(255, 255, 255));
+
 	switch (msg)
 	{
 
@@ -57,20 +105,20 @@ BOOL CALLBACK ModalDialogProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
 
 	case WM_PAINT:
 	{
+		
 		std::stringstream ss;
 		ss << "WM_PAINT with handle : " << std::hex << hwnd << std::endl;
-		OutputDebugString(ss.str().c_str());
-
+		OutputDebugString(ss.str().c_str());		
 
 	}
-
+	
 	case WM_TIMER:
 	{
 		HWND hwndProgressBar = GetDlgItem(hwnd, IDC_PROGRESS);
 		UINT iPos = SendMessage(hwndProgressBar, PBM_SETPOS, g_currentProgress, 0);
 
 		std::stringstream ss;
-		ss << "Прогресс " << g_currentProgress << " % ";
+		ss << "Установка угла решетки " << g_currentProgress << " % ";
 		SetDlgItemText(hwnd, IDC_HEADER, ss.str().c_str());
 
 
@@ -81,10 +129,21 @@ BOOL CALLBACK ModalDialogProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
 
 	break;
 
+	case WM_CTLCOLORSTATIC:
+	{		
+		HDC hdcStatic = (HDC)wParam;
+		DeleteObject(hbrBackground);
+		SetTextColor(hdcStatic, RGB(0, 0, 0));
+		SetBkColor(hdcStatic, RGB(255, 255, 255));
+		SetBkMode(hdcStatic, TRANSPARENT);			
+		return (LONG)hbrBackground;
+	}
+	break;
+
 	case WM_INITDIALOG:
 	{
 		std::stringstream ss;
-		ss << "Прогресс " << g_currentProgress << " % ";
+		ss << "Установка угла решетки " << g_currentProgress << " % ";
 		SetDlgItemText(hwnd, IDC_HEADER, ss.str().c_str());
 
 		ss << "WM_INITDIALOG with handle : " << std::hex << hwnd << std::endl;
@@ -118,28 +177,27 @@ BOOL CALLBACK ModalDialogProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
 	return TRUE; //
 }
 
-
 HWND FindTopWindow(DWORD pid)
 {
 	std::pair<HWND, DWORD> params = { 0, pid };
 
 	// Enumerate the windows using a lambda to process each window
 	BOOL bResult = EnumWindows([](HWND hwnd, LPARAM lParam) -> BOOL
-	{
-		auto pParams = (std::pair<HWND, DWORD>*)(lParam);
-
-		DWORD processId;
-		if (GetWindowThreadProcessId(hwnd, &processId) && processId == pParams->second)
 		{
-			// Stop enumerating
-			SetLastError(-1);
-			pParams->first = hwnd;
-			return FALSE;
-		}
+			auto pParams = (std::pair<HWND, DWORD>*)(lParam);
 
-		// Continue enumerating
-		return TRUE;
-	}, (LPARAM)&params);
+			DWORD processId;
+			if (GetWindowThreadProcessId(hwnd, &processId) && processId == pParams->second)
+			{
+				// Stop enumerating
+				SetLastError(-1);
+				pParams->first = hwnd;
+				return FALSE;
+			}
+
+			// Continue enumerating
+			return TRUE;
+		}, (LPARAM)&params);
 
 	if (!bResult && GetLastError() == -1 && params.first)
 	{
@@ -180,6 +238,8 @@ HWND GetDebugProcessHandle()
 {
 	DWORD id = GetProcessIdByNameW("ITest.exe");
 	HWND g_hwndProgressDlg = FindTopWindow(id);
+	
+
 	return g_hwndProgressDlg;
 }
 
@@ -207,8 +267,6 @@ void CloseProgressWnd()
 }
 
 #pragma endregion
-
-
 
 
 std::string GetLastErrorAsString()
@@ -247,46 +305,68 @@ BOOL CALLBACK WinEnum(HWND hwnd, LPARAM lParam)
 	return TRUE;
 }
 
-
-
-
-
-
-BOOL APIENTRY DllMain(HMODULE hModule,
-	DWORD  ul_reason_for_call,
-	LPVOID lpReserved
-)
+std::string getfilepath(std::string file)
 {
+	std::string fullpath = "";
+	
+	if (initdir.empty())
+		return file;
 
-	hInstance = (HINSTANCE)hModule;
+	fullpath = initdir + "\\" + file;
+	return fullpath;
+}
+
+BOOL APIENTRY DllMain(HMODULE hModule, DWORD  ul_reason_for_call, LPVOID lpReserved)
+{
+	hInstance = (HINSTANCE)hModule;	
 
 	switch (ul_reason_for_call)
 	{
 	case DLL_PROCESS_ATTACH:
-	{
-		/*
-		WORD procID = GetCurrentProcessId();
-		EnumWindows(WinEnum, GetCurrentProcessId());
-		*/
+	{	
+		char dir[MAX_PATH];
+		GetModuleFileName(hModule, dir, MAX_PATH);
+
+		initdir = dir;
+
+		const size_t pos_last_slash = initdir.rfind('\\');
+		if (std::string::npos != pos_last_slash)
+			initdir = initdir.substr(0, pos_last_slash);
+		else
+			initdir = "";		
+
+		loger.open( getfilepath("log.txt") );
+		loger << " ------        ------   " << std::endl;
+
+		hStopEvent = CreateEvent(nullptr, TRUE, FALSE, "StopReadThreadEvent");
+		InitializeCriticalSection(&workCS);
+
+		//MessageBox(g_mainWnd, dir, "dir", MB_OK | MB_ICONERROR);
+		
 	}
 	break;
 
 	case DLL_THREAD_ATTACH:
 	{
-
+		
 	}
 	break;
 
 	case DLL_THREAD_DETACH:
 	{
-
+		
 
 	}
 	break;
 
 	case DLL_PROCESS_DETACH:
 	{
+		//закрываем файл логирования
+		loger.flush();
+		loger.close();
 
+		CloseHandle(hStopEvent);
+		DeleteCriticalSection(&workCS);
 	}
 	break;
 
@@ -297,25 +377,54 @@ BOOL APIENTRY DllMain(HMODULE hModule,
 
 #pragma region ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ДЛЯ РАБОТЫ С ПРИБОРОМ
 
+int connect(std::pair<std::string, int> opt)
+{
+	std::stringstream ss;	
+	ss << "\t => получены параметры соединения ip (" << opt.first << "):port(" << opt.second << ")" << std::endl;
+
+	mb = modbus_new_tcp(opt.first.c_str(), opt.second);
+	int connected = modbus_connect(mb);
+
+	if (connected == -1)
+		ss << "\t => ошибка соединения ip (" << opt.first << "):port(" << opt.second << ")" << std::endl;
+	else
+		ss << "\t => соединение установлено ip (" << opt.first << "):port(" << opt.second << ")" << std::endl;
+
+	modbus_set_slave(mb, 1);
+	
+	loger << ss.str().c_str() << std::endl;
+	loger.flush();
+
+	return connected;
+
+}
+
 bool connect(const char* connectstring)
 {
+	std::stringstream ss;
+	ss << "connect with string : (" << ((connectstring == nullptr) ? "null" : connectstring) << std::endl;
+
 	//флаг соединения
 	int connected = -1;
 
 	//если не соеденились пробуем загрузить из файла в текущей директории "connect.txt"
 	if (connectstring == nullptr)
 	{
+		std::string fpath = getfilepath("connect.txt");
+		ss << "\t => try read connection string from (" << fpath << ")" << std::endl;
+
 		std::ifstream input;
-		input.open("connect.txt");
+		input.open(fpath);
 
-		if (input.bad())
+		if (input.bad()) {
+			ss << "\t => файл  ("<< fpath << ") не найден..." << std::endl;
 			return false;
+		}			
 
-		std::pair<std::string, int> opt = helper::connection(input);
-		mb = modbus_new_tcp(opt.first.c_str(), opt.second);
-		connected = modbus_connect(mb);
+		connected = connect( helper::connection(input) );
 
-		modbus_set_slave(mb, 1);
+		loger << ss.str().c_str() << std::endl;
+		loger.flush();
 
 		return (connected == -1) ? false : true;
 	}
@@ -323,9 +432,12 @@ bool connect(const char* connectstring)
 	try
 	{
 		// если передали строку адреса в виде "ipaddress:port" "192.168.10.18:502" 
-		std::pair<std::string, int> opt = helper::connection(connectstring);
-		mb = modbus_new_tcp(opt.first.c_str(), opt.second);
-		connected = modbus_connect(mb);
+		ss << "\t => try connect from input string ("<< connectstring << ")" << std::endl;
+		connected = connect(helper::connection(connectstring));
+
+		loger << ss.str().c_str() << std::endl;
+		loger.flush();
+
 	}
 	catch (...)
 	{
@@ -335,76 +447,130 @@ bool connect(const char* connectstring)
 	//если не соеденились пробуем загрузить из файла path
 	if (connected == -1)
 	{
+		ss << "\t => try read connection string from file ("<< connectstring << ")" << std::endl;
+
 		std::ifstream input;
 		input.open(connectstring);
 
-		std::pair<std::string, int> opt = helper::connection(input);
-		mb = modbus_new_tcp(opt.first.c_str(), opt.second);
-		connected = modbus_connect(mb);
+		if (input.bad()) {
+			ss << "\t => файл  ("<< connectstring <<") не найден..." << std::endl;
+			return false;
+		}
 
-		modbus_set_slave(mb, 1);
+		connected = connect(helper::connection(input));
+
+		loger << ss.str().c_str() << std::endl;
+		loger.flush();
 	}
 
 	//если не соеденились пробуем загрузить из файла в текущей директории "connect.txt"
 	if (connected == -1)
 	{
+		std::string fpath = getfilepath("connect.txt");
+		ss << "\t => try read connection string from (" << fpath << ")" << std::endl;
+
 		std::ifstream input;
-		input.open("connect.txt");
+		input.open(fpath);
 
-		std::pair<std::string, int> opt = helper::connection(input);
-		mb = modbus_new_tcp(opt.first.c_str(), opt.second);
-		connected = modbus_connect(mb);
+		if (input.bad()) {
+			ss << "\t => файл  (" << fpath << ") не найден..." << std::endl;
+			return false;
+		}
 
-		modbus_set_slave(mb, 1);
+		connected = connect(helper::connection(input));
+
+		loger << ss.str().c_str() << std::endl;
+		loger.flush();
+
+		return (connected == -1) ? false : true;
+
 	}
 
 	//если не удалось соеденится возвращаем  false  
 	return connected != -1;
 }
 
-
-//получение регистра
-bool  getregister(int reg, uint16_t& value)
+//попытаться почитать регистры ПЛК
+bool trygetregisters(int reg, int count, int retries, bool isInput, uint16_t* values)
 {
-	///получаем текущее состояние регистра  
-	uint16_t regs[16];
-	int readCount = modbus_read_input_registers(mb, reg, 1, regs);
+	//входим в критическую секцию
+	lock obj(&workCS);
 
-	//если не удалось выход 
-	if (readCount == -1)
-		return false;
+	std::stringstream ss;
+	ss << "trygetregister => " << std::endl;
 
-	value = regs[0];
-	return true;
+	///количество прочитанных регистров 
+	int readCount = -1;
+
+	int r = 0;
+	while (readCount == -1)
+	{
+		if (isInput) 
+		{
+			ss << "\tmodbus_read_input_registers =>  register from : (" << reg << ")" <<  " Count ("<< count << ")" << std::endl;		
+			readCount = modbus_read_input_registers(mb, reg, count, values);			
+		}
+		else 
+		{
+			ss << "\tmodbus_read_registers =>  register from : (" << reg << ")" << " Count (" << count << ")" << std::endl;		
+			readCount = modbus_read_registers(mb, reg, count, values);			
+		}
+
+		Sleep(25);
+
+		if (r++ >= retries)
+			break;
+
+		if (readCount == -1)		
+			ss << "\tПопытка №" << r << " ошибка чтения регистра (" << modbus_strerror(errno) << ")" << std::endl;		
+		
+	}
+
+	loger << ss.str().c_str();
+	loger.flush();
+
+	return (readCount != -1);
 }
 
 //установить бит в заданном регистре 
 bool setregisterbit(int reg, unsigned char bit, bool state)
 {
+	//входим в критическую секцию
+	lock obj(&workCS);
+
+	std::stringstream ss;
+	ss << "setregisterbit =>" << std::endl;
+
 	///получаем текущее состояние регистра  
 	uint16_t tab_reg[16];
-	int readCount = modbus_read_input_registers(mb, reg, 1, tab_reg);
-
-	//если не удалось выход 
-	if (readCount == -1)
+	if (!trygetregisters(reg, 1, MAX_RETRIES, true, tab_reg))
 		return false;
+	
+	//задержка перед операцией
+	Sleep(50);
 
 	//установка нужного бита в нужное состояние
 	uint16_t output = helper::setbit(tab_reg[0], bit, state);
+	ss << " => setbit register : " << reg << " bit : " << bit << " state : " << state << "output value : " << output;
 
 	//запись в регистр нового значения
 	int writeConut = modbus_write_registers(mb, reg, 1, &output);
 
 	//если запись не удлась 
-	if (writeConut == -1)
+	if (writeConut == -1) {
+		ss << " ошибка записи (" << modbus_strerror(errno) << ")" << std::endl;
+		loger << ss.str().c_str();
+		loger.flush();
 		return false;
+	}
+
+	//задержка перед операцией
+	Sleep(50);
 
 	//подтверждение записи получаем регистр заново
-	readCount = modbus_read_input_registers(mb, reg, 1, tab_reg);
-
-	//если не удалось выход 
-	if (readCount == -1)
+	if (!trygetregisters(reg, 1, MAX_RETRIES, true, tab_reg))
 		return false;
+
 
 	return true;//helper::checkbitstate(tab_reg[0], bit, state);
 }
@@ -430,15 +596,13 @@ bool setcontrolbit(unsigned char bit, bool state)
 ///проверка бита регистра
 bool checkregisterbit(int reg, unsigned char bit)
 {
-	modbus_flush(mb);
+	std::stringstream ss;
+	ss << "checkregisterbit => register : " << reg << " bit : " << 1 << std::endl;
 
 	///получаем текущее состояние регистра  
 	uint16_t tab_reg[16];
-	int readCount = modbus_read_registers(mb, reg, 1, tab_reg);
-
-	//если не удалось выход 
-	if (readCount == -1)
-		return false;
+	if (!trygetregisters(reg, 1, MAX_RETRIES, true, tab_reg))
+		return false;	
 
 	return helper::checkbit(tab_reg[0], bit);
 }
@@ -458,32 +622,125 @@ bool checkcontrolbit(unsigned char bit)
 
 bool writeangle(uint16_t angle)
 {
-	///получаем текущее состояние регистра  
-	uint16_t tab_reg[16];
-
-	/*int readCount = modbus_read_registers(mb, PositionLowRegister, 2, tab_reg);
-
-	//если не удалось выход
-	if (readCount == -1)
-		return false;
-	*/
-
-	tab_reg[0] = angle;//HIWORD(angle);
-	//tab_reg[1] = LOWORD(angle);
+	std::stringstream ss;
+	ss << "writeangle =>" << std::endl;
 
 	//запись в регистр нового значения
-	int writeConut = modbus_write_register(mb, PositionLowRegister, tab_reg[0]);
+	int writeConut = modbus_write_register(mb, PositionLowRegister, angle);
 
-	//если запись не удлась 
-	if (writeConut == -1)
+
+	//если запись не удлась 	
+	if (writeConut == -1) 
+	{
+		ss << " ошибка записи (" << modbus_strerror(errno) << ")" << std::endl;
+		loger << ss.str().c_str();
+		loger.flush();
 		return false;
+	}
 
 	return true;
 }
 
-
 #pragma endregion
 
+void configurate()
+{
+	uint32_t old_response_to_sec;
+	uint32_t old_response_to_usec;
+
+	/* Save original timeout */
+	modbus_get_response_timeout(mb, &old_response_to_sec, &old_response_to_usec);
+
+	/* Define a new and too short timeout! */
+	modbus_set_response_timeout(mb, 0, 0);
+
+	uint32_t to_sec;
+	uint32_t to_usec;
+
+	/* Save original timeout */
+	modbus_get_indication_timeout(mb, &to_sec, &to_usec);
+	modbus_set_indication_timeout(mb, 0, 0);
+}
+
+
+
+
+void readdata()
+{
+
+	OutputDebugString("Поток чтения регистров запущен...\n");
+	
+	//в цикле читаем данные из регистров
+	while (true)
+	{
+		if (WaitForSingleObject(hStopEvent, 0) == 0)
+			break;
+
+		uint16_t regs[16];
+		int count = 6;
+
+		//читаем регистры и запоолняем переменные
+		if (trygetregisters(0, count, MAX_RETRIES, true, regs))
+		{
+			EnterCriticalSection(&workCS);
+
+			//Регистр управления 8 bit  и регистр входов 8 bit
+			CONTROL_AND_INPUT_REGISTER = regs[0];
+			
+			//Верхний регистр положения
+			HIHTPOS_REGISTER	= regs[1];
+
+			//Нижний регистр положения
+			LOWPOS_REGISTER		= regs[2];
+
+			//Командный регистр 8 bit и Регистр состояний 8 bit
+			COMMAND_AND_STATUS_REGISTER = regs[3];
+			
+			//Регистр прогресса
+			PROGRESS_REGISTER = regs[4];
+
+			//Регистр версии
+			VERSION_REGISTER = regs[5];
+
+			LeaveCriticalSection(&workCS);
+		}
+		else
+		{
+			EnterCriticalSection(&workCS);
+
+			//Регистр управления 8 bit  и регистр входов 8 bit
+			CONTROL_AND_INPUT_REGISTER = -1;
+
+			//Верхний регистр положения
+			HIHTPOS_REGISTER = -1;
+
+			//Нижний регистр положения
+			LOWPOS_REGISTER = -1;
+
+			//Командный регистр 8 bit и Регистр состояний 8 bit
+			COMMAND_AND_STATUS_REGISTER = -1;
+
+			//Регистр прогресса
+			PROGRESS_REGISTER = -1;
+
+			//Регистр версии
+			VERSION_REGISTER = -1;
+
+			LeaveCriticalSection(&workCS);
+		}
+
+		std::stringstream ss;
+		for (int i = 0; i < count; i++)
+			ss << regs[i] << " ";
+
+		ss << std::endl;
+		OutputDebugString(ss.str().c_str());
+
+		Sleep(READ_INTERVAL);
+	}
+	
+	OutputDebugString("Поток чтения регистров остановлен...\n");
+}
 
 extern "C" {
 
@@ -491,35 +748,36 @@ extern "C" {
 	// Если запись прошла успешно, вернуть в функции значение true.
 	// запись прошла с ошибкой, выдать сообщение "НЭСМИТ ошибка связи", выдать значение функции false.
 	IMPEXP bool CALLCONV  InitInst(const char* path)
-	{		
+	{
+		if (hReadThread != NULL)
+			return true;
+
 		//сохраняем строки соединение
-		connectionString = path;
-
-		//подключаемся 
-		ModbusConnector mbc(connectionString.c_str());
-		mb = mbc.Get();
-
+		connectionString = (path == nullptr) ? "" : path;
+		
+		bool isConnected = connect(connectionString.c_str());
 
 		std::stringstream ss;
 		std::string cap = "НЭСМИТ : Инициализация";
-		
-		///соединение со спектрографом
-		if ( !mbc.isConnected() ) {
 
-			ss << "Ошибка соединения со  спректрографом НЕСМИТ по строке соединения - " << ((path == nullptr) ? "null" : path) << std::endl;
+		///соединение со спектрографом
+		if (!isConnected) {
+
+			ss << "Ошибка соединения со  спректрографом НЕСМИТ по строке - " << ((path == nullptr) ? "null" : path) << std::endl;
 			ss << "Выполните  следующее :" << std::endl;
 			ss << "  - Убедитесь что питание прибора влючено" << std::endl;
-			ss << "  - Убедитесь что прибора подключен к локальной сети" << std::endl;
+			ss << "  - Убедитесь что прибор подключен к локальной сети" << std::endl;
 			ss << "  - Отредактируйте файл <connect.txt> в соответствии с реальным адресом устройства (IP:PORT )" << std::endl;
 
 			MessageBox(g_mainWnd, ss.str().c_str(), cap.c_str(), MB_OK | MB_ICONERROR);
 			return false;
-		}
+		}		
+
 		
-		
+		hReadThread = CreateThread(NULL, 0, (LPTHREAD_START_ROUTINE)readdata, 0, 0, &readThreadID);
+
 		//очищаем 
 		ss.str(std::string());
-
 
 		// Записать в регистр X008, бит-0, значение 1.
 		if (setstatusbit(Client, true))
@@ -532,6 +790,7 @@ extern "C" {
 		return false;
 	}
 
+
 	//Открывает(state = 1) и закрывает(state = 0) затвор.
 	//Делаем чтение бита - 0 регистра Х008.Если бит равен 0, выводим сообщение "НЭСМИТ Не готов.", и выходим возвращая значение функции false.
 	//При значении state = 1 в регистр X001 бит 0, записать значение 1.
@@ -540,19 +799,17 @@ extern "C" {
 	//При ошибки записи, вывести сообщение "Сбой управления Shutter", вернутьь значение функции false.
 	IMPEXP bool CALLCONV Shutter(unsigned char state)
 	{
-		//подключаемся 
-		ModbusConnector mbc(connectionString.c_str());
-		mb = mbc.Get();
-
 		std::stringstream ss;
 		std::string cap = "НЭСМИТ : Управление затвором";
+
+#ifndef NOT_CHECK_CLIETN_BIT
 
 		if (!checkstatusbit(Client)) {
 			ss << "Спектрограф не готов к работе";
 			MessageBox(g_mainWnd, ss.str().c_str(), cap.c_str(), MB_OK | MB_ICONERROR);
 			return false;
 		}
-
+#endif
 		///Ошибка передачи параметра состояния затвора
 		if (state > 1)
 		{
@@ -575,10 +832,6 @@ extern "C" {
 	//Устанавливает фильтр разделения порядков с заданным номером n.
 	IMPEXP bool CALLCONV Filter(int value)
 	{
-		//подключаемся 
-		ModbusConnector mbc(connectionString.c_str());
-		mb = mbc.Get();
-
 		std::stringstream ss;
 		std::string cap = "Filter";
 
@@ -597,23 +850,22 @@ extern "C" {
 	//	Если kind = 'CS' и state = 0 тогда установить в регистре X001 бит 2 в значение 0
 	//	Если kind = 'FF' и state = 1 тогда установить в регистре X001 бит 1 в значение 1
 	//	Если kind = 'FF' и state = 0 тогда установить в регистре X001 бит 0 в значение 1
-	IMPEXP bool CALLCONV Lamp(const char *kind, unsigned char state)
+	IMPEXP bool CALLCONV Lamp(const char* kind, unsigned char state)
 	{
-		//подключаемся 
-		ModbusConnector mbc(connectionString.c_str());
-		mb = mbc.Get();
-
 		std::stringstream ss;
 		std::string cap = "НЭСМИТ : ";
 		std::string type(kind);
 
 		unsigned char bit = LampFFBit;
 
+#ifndef NOT_CHECK_CLIETN_BIT
+
 		if (!checkstatusbit(Client)) {
 			ss << "Спектрограф не готов к работе";
 			MessageBox(g_mainWnd, ss.str().c_str(), cap.c_str(), MB_OK | MB_ICONERROR);
 			return false;
 		}
+#endif
 
 		///Ошибка передачи параметра состояния лампы
 		if (state > 1)
@@ -658,7 +910,6 @@ extern "C" {
 	//	В регистр Х007, бит 0 - записать 0.
 	//	В регистр Х007, бит 1 - записать 0.
 	//	В регистр Х008. бит 2 - записать 0.
-
 	//	Затем показть на экране прогресс - бар, с подписью Движение решетки.
 	//	Значение прогрессбара. брать из регистра Х009, где о это 0 % , а 255 - это 100 % .
 	//	Необходимо чтобы значение обновлялось как минимум 2 раза в секунду.
@@ -666,19 +917,17 @@ extern "C" {
 
 	IMPEXP bool CALLCONV Disp(unsigned char state, const char* angle)
 	{
-		//подключаемся 
-		ModbusConnector mbc(connectionString.c_str());
-		mb = mbc.Get();
-
 		std::stringstream ss;
 		std::string cap = "НЭСМИТ : Диспергирующее устройство";
 
-		//спектрограф не готов к работе
+#ifndef NOT_CHECK_CLIETN_BIT
+
 		if (!checkstatusbit(Client)) {
 			ss << "Спектрограф не готов к работе";
 			MessageBox(g_mainWnd, ss.str().c_str(), cap.c_str(), MB_OK | MB_ICONERROR);
 			return false;
 		}
+#endif
 
 		//спектрограф занят другой операцией
 		bool busy = checkstatusbit(CommandBusy);
@@ -693,7 +942,6 @@ extern "C" {
 		//ошибка задания угла наклона диспергирующего устройства
 		if (ang < 8 || ang > 30)
 		{
-
 			ss << "Ошибка задания угла (от 8 до 30) : " << ang << std::endl;
 			MessageBox(g_mainWnd, ss.str().c_str(), cap.c_str(), MB_OK | MB_ICONERROR);
 			return false;
@@ -726,12 +974,20 @@ extern "C" {
 			ss << "Установка бита (Gap) " << std::endl;
 			bitIsSet = false;
 		}
+				
+		//	В регистр Х007. бит 2 - записать 0.
+		if (!setstatusbit(StopEngine, false))
+		{
+			ss << "Сбой задания угла наклона диспергирующего устройства. " << std::endl;
+			ss << "Установка бита (StopEngine) " << std::endl;
+			bitIsSet = false;
+		}
 
-		//	В регистр Х008. бит 2 - записать 0.
+		//	В регистр Х008. бит 9 - записать 0.
 		if (!setstatusbit(CommandRequest, false))
 		{
 			ss << "Сбой задания угла наклона диспергирующего устройства. " << std::endl;
-			ss << "Установка бита (CommandReques) " << std::endl;
+			ss << "Установка бита (CommandRequest) " << std::endl;
 			bitIsSet = false;
 		}
 
@@ -740,29 +996,26 @@ extern "C" {
 			MessageBox(g_mainWnd, ss.str().c_str(), cap.c_str(), MB_OK | MB_ICONERROR);
 			return false;
 		}
-		
-		uint16_t progress = 0;
-		bool complete = false;
+
+		uint16_t progress = 0;		
 
 		//отображаем окно прогресса
 		ShowProgressWnd();
-
-		while (!complete) {
+		
+		//проверяем бит регистра состояния о занятости прибора
+		while (checkstatusbit(CommandBusy)) {
 
 			//ожидаем
 			Sleep(250);
 
 			//получаем прогрес из регистра 0-255
-			getregister(ProgressRegister, progress);
+			trygetregisters(ProgressRegister, 1, MAX_RETRIES, true, &progress);
 
 			//обновляем гобальный прогресс для отображения в окне
 			g_currentProgress = progress * 100 / 256;
 
 			//обновляем окно прогресса
 			UpdateWindow(g_hwndProgressDlg);
-
-			//проверяем бит регистра состояния о занятости прибора
-			complete = !checkstatusbit(CommandBusy);
 		}
 
 		//закрываем окно прогресса
@@ -773,12 +1026,9 @@ extern "C" {
 
 
 	//Установить ширину щели спектрографа равной state.
-	IMPEXP bool CALLCONV Slit(const char *state)
+	IMPEXP bool CALLCONV Slit(const char* state)
 	{
-		//подключаемся 
-		ModbusConnector mbc(connectionString.c_str());
-		mb = mbc.Get();
-
+		/*
 		std::stringstream ss;
 		std::string cap = "НЭСМИТ : Диспергирующее устройство";
 
@@ -792,56 +1042,96 @@ extern "C" {
 			ss << " => ошибка параметра state : " << state;
 
 		MessageBox(g_mainWnd, ss.str().c_str(), cap.c_str(), MB_OK);
+		*/
 
-		return false;
+		return true;
 	}
 
 	//Выполняет все необходимые действия по подготовке спектрографа к выключению, а библиотеки к выгружению из памяти.
 	IMPEXP bool CALLCONV CloseInst()
 	{
-		//подключаемся 
-		ModbusConnector mbc(connectionString.c_str());
-		mb = mbc.Get();
-
 		std::stringstream ss;
 		std::string cap = "НЭСМИТ : Освобождение ресурсов";
 
 		// Записать в регистр X008, бит-0, значение 1.
 		if (!setstatusbit(Client, false))
 		{
-			ss << "Сбой связи со спектрографом!\nСвязь с устройством будет разорвана...";
+			ss << "Сбой связи со спектрографом!";
 			MessageBox(g_mainWnd, ss.str().c_str(), cap.c_str(), MB_OK | MB_ICONERROR);
+		}
 
-			return false;
+		if (hReadThread != nullptr)
+		{
+			//отсановка потока чтения
+			SetEvent(hStopEvent);
+			while (WaitForSingleObject(hReadThread, INFINITE) != 0);
+		
+			//сбрасываем событие остановки потока чтения
+			ResetEvent(hStopEvent);
+
+			//закрываем дескриптор потока и сбрасывем его
+			CloseHandle(hReadThread);
+			hReadThread = nullptr;
 		}
 		
 
+		//modbus_close(mb);
+		//modbus_free(mb);
+
 		return true;
 	}
 
 	//Выполняет 
-	IMPEXP bool CALLCONV GetZero(const char *state)
+	IMPEXP bool CALLCONV GetZero()
 	{
-		//подключаемся 
-		ModbusConnector mbc(connectionString.c_str());
-		mb = mbc.Get();
-
 		std::stringstream ss;
 		std::string cap = "GetZero";
 
-		ss << "Вызов функции (" << cap << ") : " << "калибровка нуля";
+#ifndef NOT_CHECK_CLIETN_BIT
 
-		MessageBox(g_mainWnd, ss.str().c_str(), cap.c_str(), MB_OK);
+		if (!checkstatusbit(Client)) {
+			ss << "Спектрограф не готов к работе";
+			MessageBox(g_mainWnd, ss.str().c_str(), cap.c_str(), MB_OK | MB_ICONERROR);
+			return false;
+		}
+#endif
+		
+		bool isCmdsComplete = true;
+
+		// Записать в регистр X008, бит-3, значение 1.
+		if (!setstatusbit(ResetZero, true))
+		{
+			ss << "Сбой связи со спектрографом!";
+			ss << "Установка бита (ResetZero) " << std::endl;
+			isCmdsComplete = false;			
+		}
+
+		if (!writeangle(0))
+		{
+			ss << "Сбой связи со спектрографом!";
+			ss << "Установка угла (0) " << std::endl;
+			isCmdsComplete = false;
+		}
+
+		// Записать в регистр X008, бит-9, значение 0.
+		if (!setstatusbit(CommandRequest, false))
+		{
+			ss << "Сбой связи со спектрографом!";
+			ss << "Установка бита (CommandRequest) " << std::endl;
+			isCmdsComplete = false;
+		}
+
+		if (!isCmdsComplete) {
+			MessageBox(g_mainWnd, ss.str().c_str(), cap.c_str(), MB_OK | MB_ICONERROR);
+			return false;
+		}
+		
 		return true;
 	}
 
 	//Выполняет 
-	IMPEXP bool CALLCONV SetTick(const char *state)
+	IMPEXP bool CALLCONV SetTick(const char* state)
 	{
-		//подключаемся 
-		ModbusConnector mbc(connectionString.c_str());
-		mb = mbc.Get();
-
 		std::stringstream ss;
 		std::string cap = "SetTick";
 

@@ -81,7 +81,15 @@ namespace helper
 		std::vector<std::string> parts = split(src, ':');
 		std::pair<std::string, int> conn;
 		
+		if (parts.size() != 2)
+		{
+			conn.first = "";
+			conn.second = 0;
+			return conn;
+		}
+
 		try {
+
 			conn.first = parts[0];
 			conn.second = std::stoi(parts[1]);
 		}
@@ -97,25 +105,11 @@ namespace helper
 	//получить праматры Modbus TCP  соединения из файла
 	static std::pair<std::string, int> connection(std::ifstream& inp)
 	{
-		std::pair<std::string, int> conn;
+		std::string line;
+		std::getline(inp, line);	
 		
-		try {
 
-			std::string line;
-			std::getline(inp, line);
-
-			std::vector<std::string> parts = split(line, ':');			
-		
-			conn.first = parts[0];
-			conn.second = std::stoi(parts[1]);
-		}
-		catch (...)
-		{
-			conn.first = "";
-			conn.second = 0;
-		}
-
-		return conn;
+		return connection(line);
 	}
 
 };

@@ -39,7 +39,7 @@ extern "C" {
 	IMPEXP bool CALLCONV CloseInst();
 
 	//Выполняет 
-	IMPEXP bool CALLCONV GetZero(const char *state);
+	IMPEXP bool CALLCONV GetZero();
 
 	//Выполняет 
 	IMPEXP bool CALLCONV SetTick(const char *state);

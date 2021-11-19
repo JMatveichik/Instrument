@@ -32,7 +32,7 @@ enum ControlAndInputRegisterBits : unsigned char
 	//бит управление лампой FF
 	LampFFBit = 0x01,
 
-	//бит управление лампой FF
+	//бит управление лампой CS
 	LampCSBit = 0x02,
 
 	//Бит упаравление питанием камеры
@@ -45,7 +45,7 @@ enum ControlAndInputRegisterBits : unsigned char
 	LimitSW = 0x08,
 
 	//бит состояние датчика полож решетки	
-	ZeroSW = 0x08,
+	ZeroSW = 0x09,
 };
 
 

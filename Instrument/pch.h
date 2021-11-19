@@ -12,22 +12,16 @@
 #pragma comment(lib, "Ws2_32.lib")
 #pragma comment (lib, "modbus.lib")
 
-
 #define _WINSOCK_DEPRECATED_NO_WARNINGS
-
 
 // add headers that you want to pre-compile here
 #include "framework.h"
 
 #include <modbus.h>
-
 #include <tlhelp32.h>
 
 #include <windows.h>
 #include <CommCtrl.h>
-//#include <WinSock2.h>
-//#include <ws2tcpip.h>
-
 
 //STL
 #include <vector>
@@ -35,7 +29,5 @@
 #include <fstream>
 #include <sstream>
 #include <bitset>
-
-
 
 #endif //PCH_H
