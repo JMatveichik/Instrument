@@ -1125,7 +1125,17 @@ extern "C" {
 			MessageBox(g_mainWnd, ss.str().c_str(), cap.c_str(), MB_OK | MB_ICONERROR);
 			return false;
 		}
+
+
+		//проверяем бит регистра состояния о занятости прибора
+		while (checkstatusbit(CommandBusy)) {
+			//ожидаем
+			Sleep(250);
+		}
 		
+		ss << "Калибровка угла решетки проша успешно!";
+		MessageBox(g_mainWnd, ss.str().c_str(), cap.c_str(), MB_OK | MB_ICONINFORMATION);
+
 		return true;
 	}
 
