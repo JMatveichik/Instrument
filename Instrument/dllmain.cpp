@@ -6,10 +6,11 @@
 #include "resource.h"
 #include "lock.h"
 
+
 //#define NOT_CHECK_CLIETN_BIT
 
-
-
+//проверять состояние бита после записи
+//#define CONFIRM_SET_BIT
 
 #pragma comment(linker, "/EXPORT:InitInst=_InitInst@4")
 #pragma comment(linker, "/EXPORT:Shutter=_Shutter@4")
@@ -53,6 +54,13 @@ std::ofstream loger;
 //максимальное количество попыток чтения регистров
 const int MAX_RETRIES = 3;
 
+//ожидание перед запросом Mmodbus, ms
+//если присутствует задержка перед выполнением следующей операции
+const int MODBUS_OPERATION_DELAY = 100;
+
+//ожидание в цикле для проверки состояния регистра
+const int CYCLE_OPERATION_DELAY = 250;
+
 //событие для остановки опроса ПЛК
 HANDLE	hStopEvent	= NULL;
 
@@ -77,8 +85,6 @@ CRITICAL_SECTION workCS;
 
 
 //---------------------------------------------------------
-
-
 #pragma region ОКНО ПРОГРЕССА
 
 #define PROGRESS_TIMER_ID 2021
@@ -399,6 +405,12 @@ int connect(std::pair<std::string, int> opt)
 
 }
 
+void flushlogger(std::stringstream &ss)
+{
+	loger << ss.str().c_str();
+	loger.flush();
+}
+
 bool connect(const char* connectstring)
 {
 	std::stringstream ss;
@@ -491,7 +503,7 @@ bool connect(const char* connectstring)
 }
 
 //попытаться почитать регистры ПЛК
-bool trygetregisters(int reg, int count, int retries, bool isInput, uint16_t* values)
+int trygetregisters(int reg, int count, int retries, bool isInput, uint16_t* values)
 {
 	//входим в критическую секцию
 	lock obj(&workCS);
@@ -516,7 +528,7 @@ bool trygetregisters(int reg, int count, int retries, bool isInput, uint16_t* va
 			readCount = modbus_read_registers(mb, reg, count, values);			
 		}
 
-		Sleep(25);
+		Sleep(MODBUS_OPERATION_DELAY);
 
 		if (r++ >= retries)
 			break;
@@ -526,119 +538,290 @@ bool trygetregisters(int reg, int count, int retries, bool isInput, uint16_t* va
 		
 	}
 
-	loger << ss.str().c_str();
-	loger.flush();
+	//обновляем логер
+	flushlogger(ss);
 
-	return (readCount != -1);
+	return readCount;
 }
 
 //установить бит в заданном регистре 
-bool setregisterbit(int reg, unsigned char bit, bool state)
+//reg - номер регистра
+//bit - номер бита
+//state - состояние в кторое нужно переключить бит
+int setregisterbit(int reg, unsigned char bit, bool state)
 {
 	//входим в критическую секцию
 	lock obj(&workCS);
 
 	std::stringstream ss;
-	ss << "setregisterbit =>" << std::endl;
+	ss << "\tsetregisterbit =>" << std::endl;
 
 	///получаем текущее состояние регистра  
-	uint16_t tab_reg[16];
-	if (!trygetregisters(reg, 1, MAX_RETRIES, true, tab_reg))
-		return false;
+	uint16_t value;
+	if (trygetregisters(reg, 1, MAX_RETRIES, true, &value) == -1)
+	{
+		ss << "\t\t=>Ошибка чтения регистра" << std::endl;
+
+		//обновить лог
+		flushlogger(ss);
+
+		return -1;
+	}		
 	
-	//задержка перед операцией
-	Sleep(50);
-
 	//установка нужного бита в нужное состояние
-	uint16_t output = helper::setbit(tab_reg[0], bit, state);
-	ss << " => setbit register : " << reg << " bit : " << bit << " state : " << state << "output value : " << output;
+	uint16_t output = helper::setbit(value, bit, state);
 
-	//запись в регистр нового значения
-	int writeConut = modbus_write_registers(mb, reg, 1, &output);
-
-	//если запись не удлась 
-	if (writeConut == -1) {
-		ss << " ошибка записи (" << modbus_strerror(errno) << ")" << std::endl;
-		loger << ss.str().c_str();
-		loger.flush();
-		return false;
+	//бит уже в заданном состоянии
+	if (output == value)
+	{
+		ss << "\t\t=> нет изменения состояния регистра => текущее : (" << value << ") новое : (" << output << ")" << std::endl;
+		
+		//обновить лог
+		flushlogger(ss);
+		
+		//бит установлен
+		return 1;
 	}
 
-	//задержка перед операцией
-	Sleep(50);
+	//для лога
+	ss << "\t\t=> изменение бита => register (" << reg << ") bit : (" << (int)bit << ") state : (" << state << ") текущее : (" << value << ")" << " новое : (" << output << ")" << std::endl;
+	
+	//ожидание между запросами Modbus
+	Sleep(MODBUS_OPERATION_DELAY);
 
-	//подтверждение записи получаем регистр заново
-	if (!trygetregisters(reg, 1, MAX_RETRIES, true, tab_reg))
-		return false;
+	//запись в регистр нового значения
+	const int writeCount = modbus_write_registers(mb, reg, 1, &output);
 
+	//если запись не удалась 
+	if (writeCount == -1) 
+		ss << "\t\t=> ошибка записи регистра => (" << modbus_strerror(errno) << ")" << std::endl;
+		
+	//обновляем логер
+	flushlogger(ss);
 
-	return true;//helper::checkbitstate(tab_reg[0], bit, state);
+//если нужно подтверждение записи
+#ifndef CONFIRM_SET_BIT
+	
+	return (writeCount == -1) ? -1 : state;
+
+#else
+	//ожидание между запросами Modbus
+	Sleep(MODBUS_OPERATION_DELAY);
+
+	//подтверждение записи - получаем регистр заново
+	if (trygetregisters(reg, 1, MAX_RETRIES, true, &value) == -1)
+	{
+		//обновляем логер
+		flushlogger(ss);
+
+		return -1;
+	}		
+	
+	//проверям соответствие на установку бита
+	const bool isBitSet = helper::checkbitstate(value, bit, state);
+
+	//если бит установлен правильно
+	if (isBitSet)
+		ss << "\t\t=> bit : (" << bit << ") установлен в заданное состояние state : (" << state << ")" << std::endl;
+	else
+		ss << "\t\t=> bit : (" << bit << ") не пререключен в состояние  state : (" << state << ")" << std::endl;
+	
+	//обновляем логер
+	flushlogger(ss);
+	
+	return (int)isBitSet;
+#endif
+
+	
 }
 
+/*
 ///установить бит в регистре статуса (X008)
-bool setstatusbit(unsigned char bit, bool state)
+int setstatusbit(unsigned char bit, bool state)
 {
+	std::stringstream ss;
+	ss << "setstatusbit => " << std::endl;
+
+	flushlogger(ss);
+
 	return setregisterbit(CommandAndStatusRegister, bit, state);
 }
 
-///установить бит в регистре команд (X007)
-bool setcommandbit(unsigned char bit, bool state)
+///установить бит в регистре команд и состояния (X007)
+int setcommandbit(unsigned char bit, bool state)
 {
+	std::stringstream ss;
+	ss << "setcommandbit => " << std::endl;
+	flushlogger(ss);
+
 	return setregisterbit(CommandAndStatusRegister, bit, state);
 }
 
-///установить бит в регистре управления (X001)
-bool setcontrolbit(unsigned char bit, bool state)
+///установить бит в регистре управления и входов (X001)
+int setcontrolbit(unsigned char bit, bool state)
 {
+	std::stringstream ss;
+	ss << "setcontrolbit => " << std::endl;
+	flushlogger(ss);
+
 	return setregisterbit(ControlAndInputRegister, bit, state);
 }
 
 ///проверка бита регистра
-bool checkregisterbit(int reg, unsigned char bit)
+int checkregisterbit(int reg, unsigned char bit)
 {
 	std::stringstream ss;
-	ss << "checkregisterbit => register : " << reg << " bit : " << 1 << std::endl;
+	ss << "\t=> checkregisterbit => register : (" << reg << ") bit : (" << bit << ")" << std::endl;
 
 	///получаем текущее состояние регистра  
-	uint16_t tab_reg[16];
-	if (!trygetregisters(reg, 1, MAX_RETRIES, true, tab_reg))
-		return false;	
+	uint16_t value;
+	if (trygetregisters(reg, 1, MAX_RETRIES, true, &value) == -1)
+		return -1;	
 
-	return helper::checkbit(tab_reg[0], bit);
+	bool isSet = helper::checkbit(value, bit);
+	return isSet ? 1 : 0;
 }
 
 ///проверить бит в регистре статуса (X008)
-bool checkstatusbit(unsigned char bit)
+int checkstatusbit(unsigned char bit)
 {
+	std::stringstream ss;
+	ss << "checkstatusbit => " << std::endl;
+	flushlogger(ss);
+
 	return checkregisterbit(CommandAndStatusRegister, bit);
 }
 
 ///проверить бит в регистре управления (X001)
-bool checkcontrolbit(unsigned char bit)
+int checkcontrolbit(unsigned char bit)
 {
+	std::stringstream ss;
+	ss << "checkcontrolbit => " << std::endl;
+	flushlogger(ss);
+
 	return checkregisterbit(ControlAndInputRegister, bit);
 }
 
-
-bool writeangle(uint16_t angle)
+//проверить корректность установки бита по результату
+bool checksetbitresult(int res, bool expected)
 {
 	std::stringstream ss;
-	ss << "writeangle =>" << std::endl;
+	ss << "\t\tchecksetbitresult => " << std::endl;
 
-	//запись в регистр нового значения
-	int writeConut = modbus_write_register(mb, PositionLowRegister, angle);
-
-
-	//если запись не удлась 	
-	if (writeConut == -1) 
+	//ошибка связи
+	if (res == -1 )
 	{
-		ss << " ошибка записи (" << modbus_strerror(errno) << ")" << std::endl;
-		loger << ss.str().c_str();
-		loger.flush();
+		ss << "\t\t\t=> Ошибка связи..." << std::endl;
+		flushlogger(ss);
+		
 		return false;
 	}
+		
+
+	//несоответствиие ожидаемого состояния
+	if (res != int(expected))
+	{
+		ss << "\t\t\t=> Несоответствиие ожидаемого состояния => ожидаемое (" << expected << ")" << " - полученное (" << res << ")" << std::endl;
+		flushlogger(ss);
+
+		return false;
+	}
+		
+	ss << "\t\t\t=> Состояние подтверждено => ожидаемое (" << expected << ")" << " - полученное (" << res << ")" << std::endl;
+	flushlogger(ss);
 
 	return true;
+}
+*/
+
+//проверка бита  готовности прибора к работе
+//return true - прибор готов
+//return false - прибор не готов
+bool clientready(std::string cap)
+{	
+	//вход в критическую секцию
+	lock obj(&workCS);	
+
+	//проверяем бит готовности клиента к работе
+	if (helper::checkbit(COMMAND_AND_STATUS_REGISTER, Client))
+		return true;
+
+	std::stringstream ss;
+	ss << "Спектрограф не готов к работе" << std::endl;
+	MessageBox(g_mainWnd, ss.str().c_str(), cap.c_str(), MB_OK | MB_ICONERROR);
+
+	//обновить логер
+	flushlogger(ss);
+
+	return false;	
+}
+
+//проверка бита  готовности прибора к работе
+//return true - прибор занят выполнением другой операции
+//return false - прибор свободен
+bool clientbusy(std::string cap)
+{
+	//вход в критическую секцию
+	lock obj(&workCS);
+
+	//проверяем бит занятости прибора 1 - занят 0 - свободен
+	if (!helper::checkbit(COMMAND_AND_STATUS_REGISTER, CommandBusy))
+		return false;
+
+	std::stringstream ss;
+	ss << "Спектрограф занят выполнением операции..." << std::endl;
+
+	MessageBox(g_mainWnd, ss.str().c_str(), cap.c_str(), MB_OK | MB_ICONERROR);
+
+	//обновить логер
+	flushlogger(ss);
+
+	return true;
+}
+
+//записать значение в регистр
+int writeregister(int reg, uint16_t value)
+{
+	//вход в критическую секцию
+	lock obj(&workCS);
+
+	std::stringstream ss;
+	ss << "writeregister => register (" << reg << ") : value (" << value << ")" << std::endl;
+
+	//запись в регистр нового значения
+	int writeCount = -1;
+
+	try 
+	{
+		writeCount = modbus_write_register(mb, reg, value);
+	}
+	catch(...)
+	{
+		writeCount = -1;
+	}
+
+	//если запись не удалась 	
+	if (writeCount == -1)
+		ss << "\tошибка записи (" << modbus_strerror(errno) << ")" << std::endl;
+	else
+		ss << "\tзаписано новое значение (" << value << ")" << std::endl;
+
+	//обновить логер
+	flushlogger(ss);
+
+	return writeCount;
+}
+
+//записать значение угла в регистр
+int writeangle(uint16_t angle)
+{
+	//вход в критическую секцию
+	lock obj(&workCS);
+
+	std::stringstream ss;
+	ss << "writeangle =>" << std::endl;	
+
+	return writeregister(PositionLowRegister, angle);
 }
 
 #pragma endregion
@@ -664,7 +847,6 @@ void configurate()
 
 
 
-
 void readdata()
 {
 
@@ -678,11 +860,12 @@ void readdata()
 
 		uint16_t regs[16];
 		int count = 6;
+		
+		EnterCriticalSection(&workCS);
 
 		//читаем регистры и запоолняем переменные
 		if (trygetregisters(0, count, MAX_RETRIES, true, regs))
-		{
-			EnterCriticalSection(&workCS);
+		{		
 
 			//Регистр управления 8 bit  и регистр входов 8 bit
 			CONTROL_AND_INPUT_REGISTER = regs[0];
@@ -701,12 +884,10 @@ void readdata()
 
 			//Регистр версии
 			VERSION_REGISTER = regs[5];
-
-			LeaveCriticalSection(&workCS);
+			
 		}
 		else
-		{
-			EnterCriticalSection(&workCS);
+		{		
 
 			//Регистр управления 8 bit  и регистр входов 8 bit
 			CONTROL_AND_INPUT_REGISTER = -1;
@@ -726,8 +907,10 @@ void readdata()
 			//Регистр версии
 			VERSION_REGISTER = -1;
 
-			LeaveCriticalSection(&workCS);
+			
 		}
+		
+		LeaveCriticalSection(&workCS);
 
 		std::stringstream ss;
 		for (int i = 0; i < count; i++)
@@ -749,7 +932,7 @@ extern "C" {
 	// запись прошла с ошибкой, выдать сообщение "НЭСМИТ ошибка связи", выдать значение функции false.
 	IMPEXP bool CALLCONV  InitInst(const char* path)
 	{
-		if (hReadThread != NULL)
+		if (hReadThread != nullptr)
 			return true;
 
 		//сохраняем строки соединение
@@ -765,29 +948,54 @@ extern "C" {
 
 			ss << "Ошибка соединения со  спректрографом НЕСМИТ по строке - " << ((path == nullptr) ? "null" : path) << std::endl;
 			ss << "Выполните  следующее :" << std::endl;
-			ss << "  - Убедитесь что питание прибора влючено" << std::endl;
+			ss << "  - Убедитесь что питание прибора включено" << std::endl;
 			ss << "  - Убедитесь что прибор подключен к локальной сети" << std::endl;
 			ss << "  - Отредактируйте файл <connect.txt> в соответствии с реальным адресом устройства (IP:PORT )" << std::endl;
 
 			MessageBox(g_mainWnd, ss.str().c_str(), cap.c_str(), MB_OK | MB_ICONERROR);
+			
+			//обновление лога
+			flushlogger(ss);
+
 			return false;
 		}		
 
-		
+		//создаем поток чтения регистров
 		hReadThread = CreateThread(NULL, 0, (LPTHREAD_START_ROUTINE)readdata, 0, 0, &readThreadID);
+		
+		//задержка перед операцией
+		Sleep(MODBUS_OPERATION_DELAY);
 
-		//очищаем 
-		ss.str(std::string());
 
-		// Записать в регистр X008, бит-0, значение 1.
-		if (setstatusbit(Client, true))
-			return true;
+		//---------------------------------------------------------------------------------
+		//ГОТОВИМ ВЫХОДНОЕ ЗНАЧЕНИЕ РЕГИСТРА
 
-		ss << "Ошибка связи со спректрографом НЕСМИТ." << std::endl;
-		ss << "  - Задание готовности клиента к работе (X008 -> CLCNT)" << std::endl;
+		//вход в критическую секцию
+		EnterCriticalSection(&workCS);
 
-		MessageBox(g_mainWnd, ss.str().c_str(), cap.c_str(), MB_OK | MB_ICONERROR);
-		return false;
+		// В регистр Х007, бит 0 - записать 1.
+		uint16_t status = helper::setbit(COMMAND_AND_STATUS_REGISTER, Client, true);		
+
+		//выход из критической секции
+		LeaveCriticalSection(&workCS);
+
+		//записываем значение в регистр
+		if (writeregister(CommandAndStatusRegister, status) == -1)
+		{
+			
+			ss << "Ошибка связи со спректрографом НЕСМИТ." << std::endl;
+			ss << " - Задание готовности клиента к работе (Client)" << std::endl;
+
+			//сообщение
+			MessageBox(g_mainWnd, ss.str().c_str(), cap.c_str(), MB_OK | MB_ICONERROR);
+
+			//обновление лога
+			flushlogger(ss);
+
+			return false;
+		}
+		
+		return true;
 	}
 
 
@@ -802,28 +1010,70 @@ extern "C" {
 		std::stringstream ss;
 		std::string cap = "НЭСМИТ : Управление затвором";
 
-#ifndef NOT_CHECK_CLIETN_BIT
-
-		if (!checkstatusbit(Client)) {
-			ss << "Спектрограф не готов к работе";
-			MessageBox(g_mainWnd, ss.str().c_str(), cap.c_str(), MB_OK | MB_ICONERROR);
+		//проверка готовности прибора
+		if (!clientready(cap))
 			return false;
-		}
-#endif
+
+
 		///Ошибка передачи параметра состояния затвора
 		if (state > 1)
 		{
 			ss << "Ошибка параметра состояния затвора : " << state;
 			MessageBox(g_mainWnd, ss.str().c_str(), cap.c_str(), MB_OK | MB_ICONERROR);
+			
+			flushlogger(ss);
+
 			return false;
 		}
 
-		//запись бита в регистр управления
-		if (!setcontrolbit(ShutterBit, (state == 1)))
+		//
+		Sleep(MODBUS_OPERATION_DELAY);
+
+
+		//---------------------------------------------------------------------------------
+		//ГОТОВИМ ВЫХОДНОЕ ЗНАЧЕНИЕ РЕГИСТРА
+
+		//вход в критическую секцию
+		EnterCriticalSection(&workCS);
+
+		// В регистр Х007, бит 0 - записать 1.
+		uint16_t status = helper::setbit(CONTROL_AND_INPUT_REGISTER, ShutterBit, (state == 1));
+
+		//выход из критической секции
+		LeaveCriticalSection(&workCS);
+
+		//записываем значение в регистр
+		if (writeregister(ControlAndInputRegister, status) == -1)
 		{
-			ss << "Сбой управления затвором";
+
+			ss << "Сбой управления затвором." << std::endl;
+			ss << " - Задание бита (ShutterBit : " << (state == 1) << ")" << std::endl;
+
+			//сообщение
 			MessageBox(g_mainWnd, ss.str().c_str(), cap.c_str(), MB_OK | MB_ICONERROR);
+
+			//обновление лога
+			flushlogger(ss);
+
 			return false;
+		}		
+
+		//ожидаем установку бита заслонки
+		while (true) {
+
+			//
+			Sleep(MODBUS_OPERATION_DELAY);
+
+			//заходим в критическую секцию
+			EnterCriticalSection(&workCS);
+
+			//проверяем бит регистра состояния заслонки  1 - включена 0 - выключена
+			if (helper::checkbit(CONTROL_AND_INPUT_REGISTER, ShutterBit) == (bool)state)
+			{
+				LeaveCriticalSection(&workCS);
+				break;
+			}
+			LeaveCriticalSection(&workCS);
 		}
 
 		return true;
@@ -834,6 +1084,10 @@ extern "C" {
 	{
 		std::stringstream ss;
 		std::string cap = "Filter";
+
+		//проверка готовности прибора
+		if (!clientready(cap))
+			return false;
 
 		ss << "Вызов функции (" << cap << ") : " << value;
 
@@ -858,14 +1112,10 @@ extern "C" {
 
 		unsigned char bit = LampFFBit;
 
-#ifndef NOT_CHECK_CLIETN_BIT
-
-		if (!checkstatusbit(Client)) {
-			ss << "Спектрограф не готов к работе";
-			MessageBox(g_mainWnd, ss.str().c_str(), cap.c_str(), MB_OK | MB_ICONERROR);
+		//проверка готовности прибора
+		if (!clientready(cap))
 			return false;
-		}
-#endif
+
 
 		///Ошибка передачи параметра состояния лампы
 		if (state > 1)
@@ -889,19 +1139,63 @@ extern "C" {
 		{
 			ss << "Ошибка параметра идентификатора лампы : " << type;
 			MessageBox(g_mainWnd, ss.str().c_str(), cap.c_str(), MB_OK | MB_ICONERROR);
+			
+			//обновляем лог
+			flushlogger(ss);
+
 			return false;
 		}
 
-		if (!setcontrolbit(bit, (state == 1)))
+		//---------------------------------------------------------------------------------
+		//ГОТОВИМ ВЫХОДНОЕ ЗНАЧЕНИЕ РЕГИСТРА
+
+		//вход в критическую секцию
+		EnterCriticalSection(&workCS);
+
+		// В регистр Х007, бит 0 - записать 1.
+		uint16_t status = helper::setbit(CONTROL_AND_INPUT_REGISTER, bit, (state == 1));
+
+		//выход из критической секции
+		LeaveCriticalSection(&workCS);
+
+		//записываем значение в регистр
+		if (writeregister(ControlAndInputRegister, status) == -1)
 		{
-			ss << "Сбой управления лампой";
+
+			ss << "Сбой управления " << cap.c_str() << std::endl;
+			ss << " - Задание бита ( "<< type.c_str() << " : " << (state == 1) << ")" << std::endl;
+
+			//сообщение
 			MessageBox(g_mainWnd, ss.str().c_str(), cap.c_str(), MB_OK | MB_ICONERROR);
+
+			//обновление лога
+			flushlogger(ss);
+
 			return false;
+		}
+		
+		//ожидаем установку бита лампы
+		while (true) {
+
+			//
+			Sleep(MODBUS_OPERATION_DELAY);
+
+			//заходим в критическую секцию
+			EnterCriticalSection(&workCS);
+
+			//проверяем бит регистра состояния лампы  1 - включена 0 - выключена
+			if (helper::checkbit(CONTROL_AND_INPUT_REGISTER, bit) == (bool)state)
+			{
+				LeaveCriticalSection(&workCS);
+				break;
+			}
+			LeaveCriticalSection(&workCS);
 		}
 
 		return true;
 	}
 
+	
 	//Установить наклон state для n-го диспергирующего устройства спектрографа.
 	//Если значение angle менее 8 или больше 30. тогда выходим, возвращая значение функции false.
 	//	Делаем чтение бита - 0 регистра Х008.Если бит равен 0, выводим сообщение "НЭСМИТ Не готов.", и выходим возвращая значение функции false.
@@ -914,108 +1208,166 @@ extern "C" {
 	//	Значение прогрессбара. брать из регистра Х009, где о это 0 % , а 255 - это 100 % .
 	//	Необходимо чтобы значение обновлялось как минимум 2 раза в секунду.
 	//	После того, как в регистре Х008, бит 2 примет значение 1, закрыть окно прогрессбара, и выйти из функции вернув значение true.
-
 	IMPEXP bool CALLCONV Disp(unsigned char state, const char* angle)
 	{
 		std::stringstream ss;
 		std::string cap = "НЭСМИТ : Диспергирующее устройство";
 
-#ifndef NOT_CHECK_CLIETN_BIT
-
-		if (!checkstatusbit(Client)) {
-			ss << "Спектрограф не готов к работе";
-			MessageBox(g_mainWnd, ss.str().c_str(), cap.c_str(), MB_OK | MB_ICONERROR);
+		//проверка готовности прибора
+		if (!clientready(cap))
 			return false;
-		}
-#endif
 
 		//спектрограф занят другой операцией
-		bool busy = checkstatusbit(CommandBusy);
-		if (busy) {
-			ss << "Спектрограф занят выполнением операции...";
-			MessageBox(g_mainWnd, ss.str().c_str(), cap.c_str(), MB_OK | MB_ICONERROR);
+		if (clientbusy(cap))
 			return false;
-		}
 
-
-		int ang = std::atoi(angle);
-		//ошибка задания угла наклона диспергирующего устройства
-		if (ang < 8 || ang > 30)
-		{
-			ss << "Ошибка задания угла (от 8 до 30) : " << ang << std::endl;
-			MessageBox(g_mainWnd, ss.str().c_str(), cap.c_str(), MB_OK | MB_ICONERROR);
-			return false;
-		}
-
+		//если в системе испльзуется другой разделитель дробной части
+		// она будет отброшена и взята целочисленная часть 12,5 при использовании точки
+		// переведется в 12 а при использовании запятой в 12.5
 		//приводим к внутреннему значению прибора
-		ang *= 1000;
+		const int ang = int(std::atof(angle) * 1000);
 
-		if (!writeangle(ang))
+		//ошибка задания угла наклона диспергирующего устройства
+		if (ang < 8000 || ang > 30000)
 		{
-			ss << "Сбой задания угла наклона диспергирующего устройства";
+			ss << "Ошибка задания угла (от 8° до 30°) : " << ang << std::endl;
 			MessageBox(g_mainWnd, ss.str().c_str(), cap.c_str(), MB_OK | MB_ICONERROR);
+
+			//обновляем лог
+			flushlogger(ss);
+
 			return false;
 		}
 
-		bool bitIsSet = true;
+		
+		
 
-		//	В регистр Х007, бит 0 - записать 0.
-		if (!setcommandbit(Angle, false))
+		EnterCriticalSection(&workCS);
+
+		//обновляем гобальный прогресс для отображения в окне
+		if (ang == LOWPOS_REGISTER)
 		{
-			ss << "Сбой задания угла наклона диспергирующего устройства. " << std::endl;
-			ss << "Установка бита (Angle) " << std::endl;
-			bitIsSet = false;
+			
+			//выходим из критической секции
+			LeaveCriticalSection(&workCS);
+
+			return true;
 		}
 
-		//	В регистр Х007, бит 1 - записать 0.
-		if (!setcommandbit(Gap, false))
+		//выходим из критической секции
+		LeaveCriticalSection(&workCS);
+
+		//ожидание пред следующей операцией
+		Sleep(MODBUS_OPERATION_DELAY);
+
+		if (writeangle(ang) == -1 )
 		{
-			ss << "Сбой задания угла наклона диспергирующего устройства. " << std::endl;
-			ss << "Установка бита (Gap) " << std::endl;
-			bitIsSet = false;
+			ss << "Сбой задания угла наклона диспергирующего устройства." << std::endl;
+			ss << "Функция writeangle ("<< ang << ")." << std::endl;
+
+			MessageBox(g_mainWnd, ss.str().c_str(), cap.c_str(), MB_OK | MB_ICONERROR);
+			
+			//обновляем лог
+			flushlogger(ss);
+
+			return false;
 		}
+
+		
+		//ожидание пред следующей операцией
+		Sleep(MODBUS_OPERATION_DELAY);		
 				
-		//	В регистр Х007. бит 2 - записать 0.
-		if (!setstatusbit(StopEngine, false))
+		//---------------------------------------------------------------------------------
+		//ГОТОВИМ ВЫХОДНОЕ ЗНАЧЕНИЕ РЕГИСТРА
+		
+		//вход в критическую секцию
+		EnterCriticalSection(&workCS);
+
+		// В регистр Х007, бит 0 - записать 0.
+		uint16_t status = helper::setbit(COMMAND_AND_STATUS_REGISTER, Angle, false);
+
+		// В регистр Х007, бит 1 - записать 0.
+		status = helper::setbit(status, Gap, false);
+
+		// В регистр Х007. бит 2 - записать 0.
+		status = helper::setbit(status, StopEngine, false);		
+		
+		// В регистр Х008. бит 9 - записать 0.
+		status = helper::setbit(status, CommandRequest, false);
+
+		LeaveCriticalSection(&workCS);
+
+		//записываем значение в регистр
+		if (writeregister(CommandAndStatusRegister, status) == -1)
 		{
 			ss << "Сбой задания угла наклона диспергирующего устройства. " << std::endl;
-			ss << "Установка бита (StopEngine) " << std::endl;
-			bitIsSet = false;
-		}
-
-		//	В регистр Х008. бит 9 - записать 0.
-		if (!setstatusbit(CommandRequest, false))
-		{
-			ss << "Сбой задания угла наклона диспергирующего устройства. " << std::endl;
-			ss << "Установка бита (CommandRequest) " << std::endl;
-			bitIsSet = false;
-		}
-
-		if (!bitIsSet)
-		{
+			ss << " - Установка бита (Angle) " << std::endl;
+			ss << " - Установка бита (Gap) " << std::endl;
+			ss << " - Установка бита (StopEngine) " << std::endl;
+			ss << " - Установка бита (CommandRequest) " << std::endl;
+			
+			//сообщение
 			MessageBox(g_mainWnd, ss.str().c_str(), cap.c_str(), MB_OK | MB_ICONERROR);
+			
+			//обновление лога
+			flushlogger(ss);
+
 			return false;
 		}
+		//---------------------------------------------------------------------------------				
+				
 
-		uint16_t progress = 0;		
+		g_currentProgress = 0;
 
 		//отображаем окно прогресса
-		ShowProgressWnd();
+		ShowProgressWnd();	
+
+		//ожидаем бита занятости
 		
-		//проверяем бит регистра состояния о занятости прибора
-		while (checkstatusbit(CommandBusy)) {
+		while (true) {
 
+			Sleep(CYCLE_OPERATION_DELAY);
+
+			//заходим в критическую секцию
+			EnterCriticalSection(&workCS);
+
+			//проверяем бит регистра состояния о занятости прибора
+			//бит регистра состояния о занятости прибора снят-  1 занят 0 свободен
+			if (helper::checkbit(COMMAND_AND_STATUS_REGISTER, CommandBusy))
+			{
+				LeaveCriticalSection(&workCS);
+				break;
+			}
+			LeaveCriticalSection(&workCS);
+		}
+
+		
+		while (true) 
+		{
 			//ожидаем
-			Sleep(250);
+			Sleep(CYCLE_OPERATION_DELAY);
 
-			//получаем прогрес из регистра 0-255
-			trygetregisters(ProgressRegister, 1, MAX_RETRIES, true, &progress);
+			//заходим в критическую секцию
+			EnterCriticalSection(&workCS);
 
+			//проверяем бит регистра состояния о занятости прибора
+			//бит регистра состояния о занятости прибора снят-  1 занят 0 свободен
+			if (!helper::checkbit(COMMAND_AND_STATUS_REGISTER, CommandBusy))
+			{
+				LeaveCriticalSection(&workCS);
+				break;	
+			}					
+			
 			//обновляем гобальный прогресс для отображения в окне
-			g_currentProgress = progress * 100 / 256;
+			g_currentProgress = PROGRESS_REGISTER * 100 / 255;
+
+			//выходим из критической секции
+			LeaveCriticalSection(&workCS);
 
 			//обновляем окно прогресса
 			UpdateWindow(g_hwndProgressDlg);
+
+			
 		}
 
 		//закрываем окно прогресса
@@ -1023,7 +1375,6 @@ extern "C" {
 
 		return true;
 	}
-
 
 	//Установить ширину щели спектрографа равной state.
 	IMPEXP bool CALLCONV Slit(const char* state)
@@ -1051,14 +1402,42 @@ extern "C" {
 	IMPEXP bool CALLCONV CloseInst()
 	{
 		std::stringstream ss;
-		std::string cap = "НЭСМИТ : Освобождение ресурсов";
+		std::string cap = "НЭСМИТ : Освобождение ресурсов";		
+		
+		
+		EnterCriticalSection(&workCS);
 
-		// Записать в регистр X008, бит-0, значение 1.
-		if (!setstatusbit(Client, false))
+		// В регистр Х007, бит 0 - записать 0.
+		uint16_t status = helper::setbit(COMMAND_AND_STATUS_REGISTER, Client, false);
+
+		LeaveCriticalSection(&workCS);
+
+		
+		if  ( writeregister(CommandAndStatusRegister, status) == -1)
 		{
 			ss << "Сбой связи со спектрографом!";
 			MessageBox(g_mainWnd, ss.str().c_str(), cap.c_str(), MB_OK | MB_ICONERROR);
+
+			flushlogger(ss);
 		}
+
+		while (true) {
+
+			Sleep(CYCLE_OPERATION_DELAY);
+
+			//заходим в критическую секцию
+			EnterCriticalSection(&workCS);
+
+			//проверяем бит регистра состояния о занятости прибора
+			//бит регистра состояния о занятости прибора снят-  
+			if (!helper::checkbit(COMMAND_AND_STATUS_REGISTER, Client))
+			{
+				LeaveCriticalSection(&workCS);
+				break;
+			}
+			LeaveCriticalSection(&workCS);
+		}
+		
 
 		if (hReadThread != nullptr)
 		{
@@ -1072,69 +1451,131 @@ extern "C" {
 			//закрываем дескриптор потока и сбрасывем его
 			CloseHandle(hReadThread);
 			hReadThread = nullptr;
+
+			//освобождаем  ресурсы modbus
+			modbus_close(mb);
+			modbus_free(mb);
 		}
 		
-
-		//modbus_close(mb);
-		//modbus_free(mb);
 
 		return true;
 	}
 
-	//Выполняет 
+	///-------------------------------------------------------
+	//Выполняет калбровку нуля
 	IMPEXP bool CALLCONV GetZero()
 	{
 		std::stringstream ss;
 		std::string cap = "GetZero";
 
-#ifndef NOT_CHECK_CLIETN_BIT
-
-		if (!checkstatusbit(Client)) {
-			ss << "Спектрограф не готов к работе";
-			MessageBox(g_mainWnd, ss.str().c_str(), cap.c_str(), MB_OK | MB_ICONERROR);
-			return false;
-		}
-#endif
+		//проверка готовности прибора
+		if (!clientready(cap))
+			return false;		
 		
-		bool isCmdsComplete = true;
 
-		// Записать в регистр X008, бит-3, значение 1.
-		if (!setstatusbit(ResetZero, true))
+		//ожидание между запросами Modbus
+		Sleep(MODBUS_OPERATION_DELAY);
+
+
+		//---------------------------------------------------------------------------------
+		//ГОТОВИМ ВЫХОДНОЕ ЗНАЧЕНИЕ РЕГИСТРА
+
+		//вход в критическую секцию
+		EnterCriticalSection(&workCS);
+
+		// В регистр Х007, бит 3 - записать 1.
+		uint16_t status = helper::setbit(COMMAND_AND_STATUS_REGISTER, ResetZero, true);
+				
+		// В регистр Х008. бит 9 - записать 0.
+		status = helper::setbit(status, CommandRequest, false);
+
+		LeaveCriticalSection(&workCS);
+
+		
+		//записываем значение в регистр
+		if (writeregister(CommandAndStatusRegister, status) == -1)
 		{
-			ss << "Сбой связи со спектрографом!";
-			ss << "Установка бита (ResetZero) " << std::endl;
-			isCmdsComplete = false;			
-		}
+			ss << "Сбой калибровки нуля" << std::endl;
+			ss << " - Установка бита (ResetZero) " << std::endl;			
+			ss << " - Установка бита (CommandRequest) " << std::endl;
 
-		if (!writeangle(0))
-		{
-			ss << "Сбой связи со спектрографом!";
-			ss << "Установка угла (0) " << std::endl;
-			isCmdsComplete = false;
-		}
-
-		// Записать в регистр X008, бит-9, значение 0.
-		if (!setstatusbit(CommandRequest, false))
-		{
-			ss << "Сбой связи со спектрографом!";
-			ss << "Установка бита (CommandRequest) " << std::endl;
-			isCmdsComplete = false;
-		}
-
-		if (!isCmdsComplete) {
+			//сообщение
 			MessageBox(g_mainWnd, ss.str().c_str(), cap.c_str(), MB_OK | MB_ICONERROR);
+
+			//обновление лога
+			flushlogger(ss);
+
+			return false;
+		}
+		
+		//ожидание между запросами Modbus
+		Sleep(MODBUS_OPERATION_DELAY);
+
+		if (writeangle(0) == -1)
+		{
+			ss << "Сбой связи со спектрографом!" << std::endl;
+			ss << " - Установка угла (0) " << std::endl;
+
+			MessageBox(g_mainWnd, ss.str().c_str(), cap.c_str(), MB_OK | MB_ICONERROR);
+
+			//обновление лога
+			flushlogger(ss);
+			
 			return false;
 		}
 
+		//ожидание между запросами Modbus
+		Sleep(MODBUS_OPERATION_DELAY);
 
-		//проверяем бит регистра состояния о занятости прибора
-		while (checkstatusbit(CommandBusy)) {
+		
+		//ожидаем бита занятости
+		while (true) {
+
+			Sleep(CYCLE_OPERATION_DELAY);
+
+			//заходим в критическую секцию
+			EnterCriticalSection(&workCS);
+
+			//проверяем бит регистра состояния запросе  на выполнение  команды. 
+			//бит регистра состояния о занятости прибора снят-  0 - запрос 1 -  готово
+
+			if (!helper::checkbit(COMMAND_AND_STATUS_REGISTER, CommandRequest))
+			{
+				LeaveCriticalSection(&workCS);
+				break;
+			}
+
+			LeaveCriticalSection(&workCS);
+		}
+
+		while (true) {
+
 			//ожидаем
-			Sleep(250);
+			Sleep(CYCLE_OPERATION_DELAY);
+
+			//заходим в критическую секцию
+			EnterCriticalSection(&workCS);
+
+			//проверяем бит регистра состояния о занятости прибора
+			//бит регистра состояния о занятости прибора снят
+			if (helper::checkbit(COMMAND_AND_STATUS_REGISTER, CommandRequest))
+			{
+				LeaveCriticalSection(&workCS);
+				break;
+			}
+		
+			//выходим из критической секции
+			LeaveCriticalSection(&workCS);				
+
+			
 		}
 		
-		ss << "Калибровка угла решетки проша успешно!";
+		
+		ss << "Калибровка угла наклона решетки завершена..." << std::endl;
 		MessageBox(g_mainWnd, ss.str().c_str(), cap.c_str(), MB_OK | MB_ICONINFORMATION);
+
+		//ОБНОВЛЕНИЕ ЛОГА
+		flushlogger(ss);		
 
 		return true;
 	}
