@@ -1,10 +1,15 @@
 // dllmain.cpp : Defines the entry point for the DLL application.
 #include "pch.h"
+
+#include <winuser.h>
+
 #include "instrument.h"
 #include "registers.h"
 #include "helper.h"
 #include "resource.h"
 #include "lock.h"
+
+#include "connectionhandlers.h"
 
 
 //#define NOT_CHECK_CLIETN_BIT
@@ -402,7 +407,6 @@ int connect(std::pair<std::string, int> opt)
 	loger.flush();
 
 	return connected;
-
 }
 
 void flushlogger(std::stringstream &ss)
@@ -937,6 +941,9 @@ extern "C" {
 
 		//сохраняем строки соединение
 		connectionString = (path == nullptr) ? "" : path;
+
+		std::pair<std::string, int> connectionData = ConnectionStringHandlers::getConnectionData(connectionString);
+		
 		
 		bool isConnected = connect(connectionString.c_str());
 
