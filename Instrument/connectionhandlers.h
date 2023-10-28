@@ -36,7 +36,7 @@ protected:
             std::string portStr = connectionString.substr(colonPos + 1);
 
             if (!ValidateIPAddress(ipAddress)) {
-                throw std::invalid_argument("Invalid IP address format: " + ipAddress);
+                throw std::invalid_argument("Invalid IP address format : " + ipAddress);
             }
 
             try 
@@ -44,16 +44,16 @@ protected:
                 int port = std::stoi(portStr);
                 if (!ValidatePort(port)) 
                 {
-                    throw std::invalid_argument("Invalid port number: " + portStr);
+                    throw std::invalid_argument("Invalid port number : " + portStr);
                 }
                 return std::make_pair(ipAddress, port);
             }
-            catch (const std::exception& e) 
+            catch (...) 
             {
-                throw std::invalid_argument("Invalid port number: " + portStr);
+                throw std::invalid_argument("Invalid port number : " + portStr);
             }
         }
-        throw std::invalid_argument("Invalid connectionString format: " + connectionString);
+        throw std::invalid_argument("Invalid connectionString format : " + connectionString);
     }
 
 private:
@@ -84,6 +84,8 @@ protected:
             file.close();
             return fileConnectionString;
         }
+		
+        return filepath;
 	}
 	
 public:
@@ -100,6 +102,8 @@ public:
                 return nextHandler_->getConnectionData(filepath);
             }
     	}
+
+    	return {};
     }
 };
 

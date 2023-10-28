@@ -29,5 +29,6 @@
 #include <fstream>
 #include <sstream>
 #include <bitset>
+#include <chrono>
 
 #endif //PCH_H
