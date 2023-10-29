@@ -179,16 +179,22 @@
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
+    <ClInclude Include="connectionhandlers.h" />
+    <ClInclude Include="deviceexception.h" />
     <ClInclude Include="framework.h" />
     <ClInclude Include="helper.h" />
+    <ClInclude Include="loggers.h" />
     <ClInclude Include="instrument.h" />
+    <ClInclude Include="NesmitDevice.h" />
     <ClInclude Include="pch.h" />
     <ClInclude Include="registers.h" />
     <ClInclude Include="resource.h" />
   </ItemGroup>
   <ItemGroup>
+    <ClCompile Include="deviceexception.cpp" />
     <ClCompile Include="dllmain.cpp" />
-    <ClCompile Include="helper.cpp" />
+    <ClCompile Include="loggers.cpp" />
+    <ClCompile Include="NesmitDevice.cpp" />
     <ClCompile Include="pch.cpp">
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">Create</PrecompiledHeader>
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">Create</PrecompiledHeader>

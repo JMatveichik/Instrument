@@ -1,5 +1,16 @@
 #pragma once
 
+
+/*
+uint16_t	CONTROL_AND_INPUT_REGISTER = 0;
+uint16_t	HIGHPOS_REGISTER = 0;
+uint16_t	LOWPOS_REGISTER = 0;
+uint16_t	COMMAND_AND_STATUS_REGISTER = 0;
+uint16_t	PROGRESS_REGISTER = 0;
+uint16_t	VERSION_REGISTER = 0;
+*/
+
+
 //начальные адреса регистров
 enum RegisterStartAddress : int
 {
