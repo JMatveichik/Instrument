@@ -7,11 +7,8 @@
 
 #include "connectionhandlers.h"
 #include "NesmitDevice.h"
-#include "deviceexception.h"
 #include "loggers.h"
 
-
-//#define NOT_CHECK_CLIETN_BIT
 
 //проверять состояние бита после записи
 //#define CONFIRM_SET_BIT
@@ -607,21 +604,8 @@ extern "C" {
 	//Установить ширину щели спектрографа равной state.
 	IMPEXP bool CALLCONV Slit(const char* state)
 	{
-		/*
 		std::stringstream ss;
-		std::string cap = "НЭСМИТ : Диспергирующее устройство";
-
-
-		ss << "Вызов функции (" << cap << ") : ";
-		if (state[0] == 1)
-			ss << " => открытие...";
-		else if (state[0] == 0)
-			ss << " => закрытие...";
-		else
-			ss << " => ошибка параметра state : " << state;
-
-		MessageBox(g_mainWnd, ss.str().c_str(), cap.c_str(), MB_OK);
-		*/
+		std::string cap = "НЭСМИТ : Диспергирующее устройство";		
 
 		return true;
 	}
@@ -705,14 +689,6 @@ extern "C" {
 	{
 		std::stringstream ss;
 		std::string cap = "SetTick";
-
-		/*
-
-		ss << "Вызов функции (" << cap << ") : " << "не используется";
-
-		MessageBox(g_mainWnd, ss.str().c_str(), cap.c_str(), MB_OK);
-
-		*/
 		
 		return true;
 	}

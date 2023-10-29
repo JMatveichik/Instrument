@@ -60,8 +60,8 @@ bool NesmitDevice::connect(const std::string& ip, const int& port)
 	// ”станавливаем Modbus адрес устройства (обычно это не требуетс€ дл€ Modbus TCP)
 	modbus_set_slave(_connection, 1);
 
-	//сонфигурируем параметры соединени€
-	configurate();
+	//конфигурируем параметры соединени€
+	//configurate();
 	
 	return true;
 }
@@ -73,6 +73,7 @@ void NesmitDevice::disconect()
 	//освобождаем  ресурсы modbus
 	modbus_close(_connection);
 	modbus_free(_connection);
+	_connection = nullptr;
 }
 
 //----------------------------------------------------
@@ -98,18 +99,17 @@ void NesmitDevice::configurate()
 
 //----------------------------------------------------
 // ¬ регистр ’007, бит 0 - записать 1.
-//
 void NesmitDevice::initialize()
 {
 	//получаем регистр команд и состо€ни€
-	uint16_t COMMAND_AND_STATUS_REGISTER = getregister(ControlAndInputRegister);
+	uint16_t COMMAND_AND_STATUS_REGISTER = getregister(CommandAndStatusRegister);
 	
 	// ¬ регистр ’007, бит 0 - записать 1.
 	uint16_t status = bit::setbit(COMMAND_AND_STATUS_REGISTER, Client, true);
 
 	
 	//записываем значение в регистр
-	if (writeregister(ControlAndInputRegister, status) == -1)
+	if (writeregister(CommandAndStatusRegister, status) == -1)
 	{
 		std::stringstream ss;
 		
@@ -127,7 +127,7 @@ void NesmitDevice::initialize()
 bool NesmitDevice::clientready() const 
 {
 	//получаем регистр команд и состо€ни€
-	uint16_t COMMAND_AND_STATUS_REGISTER = getregister(ControlAndInputRegister);
+	uint16_t COMMAND_AND_STATUS_REGISTER = getregister(CommandAndStatusRegister);
 	
 	//провер€ем бит готовности клиента к работе
 	if (bit::checkbit(COMMAND_AND_STATUS_REGISTER, Client))
@@ -143,7 +143,7 @@ bool NesmitDevice::clientready() const
 bool NesmitDevice::clientbusy() const
 {
 	//получаем регистр команд и состо€ни€
-	uint16_t COMMAND_AND_STATUS_REGISTER = getregister(ControlAndInputRegister);
+	uint16_t COMMAND_AND_STATUS_REGISTER = getregister(CommandAndStatusRegister);
 
 	//провер€ем бит зан€тости прибора 1 - зан€т 0 - свободен
 	if (!bit::checkbit(COMMAND_AND_STATUS_REGISTER, CommandBusy))
@@ -159,7 +159,7 @@ bool NesmitDevice::clientbusy() const
 bool NesmitDevice::commandrequested() const
 {
 	//получаем регистр команд и состо€ни€
-	uint16_t COMMAND_AND_STATUS_REGISTER = getregister(ControlAndInputRegister);
+	uint16_t COMMAND_AND_STATUS_REGISTER = getregister(CommandAndStatusRegister);
 	
 	//проверка бита  запроса команды на выполнение
 	if (!bit::checkbit(COMMAND_AND_STATUS_REGISTER, CommandRequest))
@@ -226,37 +226,37 @@ int NesmitDevice::trygetregisters(int reg, int count, uint16_t* values, int retr
 	std::stringstream ss;
 	ss << "trygetregister => " << std::endl;
 
-	///количество прочитанных регистров 
-	int readCount = -1;
+	///результат чтени€ регистров 
+	int result  = -1;
 
-	int r = 0;
-	while (readCount == -1)
+	//попытка
+	int retrie = 0;
+	
+	while (result < 0)
 	{
 		if (isInput)
 		{
 			ss << "\tmodbus_read_input_registers =>  register from : (" << reg << ")" << " Count (" << count << ")" << std::endl;
-			readCount = modbus_read_input_registers(_connection, reg, count, values);
+			result = modbus_read_input_registers(_connection, reg, count, values);			
 		}
 		else
 		{
 			ss << "\tmodbus_read_registers =>  register from : (" << reg << ")" << " Count (" << count << ")" << std::endl;
-			readCount = modbus_read_registers(_connection, reg, count, values);
+			result = modbus_read_registers(_connection, reg, count, values);
 		}
-
+		
 		Sleep(MODBUS_OPERATION_DELAY);
 
-		if (r++ >= retries)
+		if (retrie++ >= retries)
 			break;
 
-		if (readCount == -1)
-			ss << "\tѕопытка є" << r << " ошибка чтени€ регистра (" << modbus_strerror(errno) << ")" << std::endl;
-
+		if (result < 0) 
+		{
+			ss << "\tѕопытка є" << retrie << " ошибка чтени€ регистра (" << modbus_strerror(errno) << ")" << std::endl;
+		}
 	}
 
-	//обновл€ем логер
-	//flushlogger(ss);
-
-	return readCount;
+	return result;
 }
 
 

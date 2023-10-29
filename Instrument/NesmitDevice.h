@@ -187,7 +187,7 @@ protected :
 private:
 
 	//modbus соединение
-	modbus_t* _connection;
+	modbus_t* _connection = nullptr;
 
 	//критическая секция обработки/записи даных
 	mutable CRITICAL_SECTION _nesvitCS;
